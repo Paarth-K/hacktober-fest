@@ -15,17 +15,29 @@ Tell it what you want changed in your project, in plain words. A local Gemma mod
  Esc stop Claude · Tab switch view · ↑↓ changes · Ctrl+C quit
 ```
 
-## Open it
+## Install and open it
+
+Pick one way to install the `lcc` command (one time, from this repo):
 
 ```bash
-# one time, from this repo
 npm install
-npm link            # installs the `lcc` command
 
-# every time: from inside the project you want to change
+# A) Linked (for development): lcc runs this repo's code; `git pull` updates it.
+npm link
+
+# B) Real global install: builds a self-contained package and installs a copy.
+npm pack                                   # runs `npm run build:cli`, makes local-code-companion-0.1.0.tgz
+npm install -g ./local-code-companion-0.1.0.tgz
+```
+
+Then, every time, go to the project you want to change and run it there:
+
+```bash
 cd ~/path/to/your/project
 lcc                 # or: lcc ~/path/to/your/project
 ```
+
+To remove it: `npm uninstall -g local-code-companion`.
 
 You need [Ollama](https://ollama.com) running with a Gemma model (`ollama pull gemma4:31b`), and Claude Code installed and logged in (run `claude` once). `lcc --window` opens the older floating desktop window instead.
 

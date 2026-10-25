@@ -9,3 +9,4 @@ src-tauri/gen/
 .env
 .env.*
 .lcc-data/
+dist-cli/
