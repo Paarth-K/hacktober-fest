@@ -123,7 +123,7 @@ h3 { margin-bottom: 5px; font-size: 11px; }
 .task-details { display: grid; gap: 9px; padding: 0 10px 10px 28px; }
 .criteria-list { display: grid; gap: 5px; }
 .criterion { display: flex; align-items: flex-start; gap: 7px; color: var(--text); font-size: 10px; line-height: 1.35; }
-.criterion input { flex: 0 0 auto; width: 13px; margin: 1px 0 0; accent-color: var(--verified); }
+.criterion > input[type="checkbox"] { flex: 0 0 auto; width: 13px; margin: 1px 0 0; accent-color: var(--verified); }
 .criterion small { display: block; color: var(--muted); font-size: 8px; }
 .evidence-block { padding: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 .evidence-heading { display: flex; justify-content: space-between; margin-bottom: 5px; color: var(--muted); font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .07em; }
@@ -145,7 +145,7 @@ h3 { margin-bottom: 5px; font-size: 11px; }
 .edit-row { display: flex; gap: 6px; }
 .edit-row input { min-width: 0; }
 .criterion > span { min-width: 0; flex: 1; }
-.criterion-text { padding: 4px 6px; font-size: 9px; }
+.criterion-text { width: 100%; min-width: 0; flex: 1 1 auto; padding: 4px 6px; font-size: 9px; }
 .danger-button { color: white; background: color-mix(in srgb, var(--danger) 78%, var(--surface)); }
 
 .command-list { display: grid; gap: 7px; }
