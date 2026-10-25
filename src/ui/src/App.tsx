@@ -7,6 +7,7 @@ import { LearningPanel } from "./components/LearningPanel.js";
 import { ProgressHeader } from "./components/ProgressHeader.js";
 import { TaskList } from "./components/TaskList.js";
 import { VerifyPanel } from "./components/VerifyPanel.js";
+import { VibePanel } from "./components/VibePanel.js";
 import { applyEngineEvent, initialUiState } from "./lib/state.js";
 import { openWorkspaceFile, pickWorkspace, setCompact, setPinned } from "./lib/tauri.js";
 
@@ -17,9 +18,11 @@ export function App() {
   const [connection, setConnection] = useState<UiConnection>("connecting");
   const [notice, setNotice] = useState("Connecting to the local engine…");
   const [invalidMessage, setInvalidMessage] = useState("");
-  const [activeTab, setActiveTab] = useState<"progress" | "learn">("progress");
+  const [activeTab, setActiveTab] = useState<"build" | "progress" | "learn">("build");
   const [report, setReport] = useState("");
   const clientRef = useRef<EngineClient | null>(null);
+  /** Folder we asked the engine to switch to; its notice clears when the engine confirms it. */
+  const pendingRootRef = useRef<string | null>(null);
   const stateRef = useRef(state);
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -51,6 +54,10 @@ export function App() {
     });
 
     const handleServerEvent = (event: ServerEnvelope) => {
+      if (event.type === "state_snapshot" && pendingRootRef.current && event.payload.project?.rootPath === pendingRootRef.current) {
+        pendingRootRef.current = null;
+        setNotice("");
+      }
       if (event.type === "report_ready") {
         setReport(event.payload.markdown);
         setNotice(event.payload.savedPath ? `Report saved to ${event.payload.savedPath}` : "Report ready to copy.");
@@ -119,8 +126,10 @@ export function App() {
       if (!("__TAURI_INTERNALS__" in window)) setNotice("Workspace selection is available in the Tauri app.");
       return;
     }
-    send({ type: "set_project", payload: { rootPath, ...(state.project?.goal ? { goal: state.project.goal } : {}) } });
-    setNotice(`Workspace selected: ${rootPath}. Waiting for engine snapshot.`);
+    // A new folder starts with its own goal; don't carry the previous project's goal over.
+    pendingRootRef.current = rootPath;
+    send({ type: "set_project", payload: { rootPath } });
+    setNotice(`Opening ${rootPath}…`);
   };
 
   const requestBreakdown = (promptText: string) => {
@@ -172,10 +181,10 @@ export function App() {
       {invalidMessage && <button className="notice error" onClick={() => setInvalidMessage("")}>Invalid engine message ignored: {invalidMessage}<span>×</span></button>}
 
       <ProgressHeader project={state.project} progress={state.progress} tasks={state.tasks} compact={false} onExpand={() => undefined} />
-      <nav className="tabs" aria-label="Companion sections"><button className={activeTab === "progress" ? "active" : ""} onClick={() => setActiveTab("progress")}>Progress</button><button className={activeTab === "learn" ? "active" : ""} onClick={() => setActiveTab("learn")}>Learn</button></nav>
+      <nav className="tabs" aria-label="Companion sections"><button className={activeTab === "build" ? "active" : ""} onClick={() => setActiveTab("build")}>Build</button><button className={activeTab === "progress" ? "active" : ""} onClick={() => setActiveTab("progress")}>Progress</button><button className={activeTab === "learn" ? "active" : ""} onClick={() => setActiveTab("learn")}>Learn</button></nav>
 
       <div className="content">
-        {!state.project ? <section className="panel empty-state"><div className="empty-icon">⌂</div><h2>Choose your workspace</h2><p>Pick a local project and set a goal to begin tracking evidence.</p><button onClick={() => void chooseWorkspace()}>Choose folder</button></section> : activeTab === "progress" ? <>
+        {!state.project ? <section className="panel empty-state"><div className="empty-icon">⌂</div><h2>Choose your workspace</h2><p>Pick the local project your coding agent should work in.</p><button onClick={() => void chooseWorkspace()}>Choose folder</button></section> : activeTab === "build" ? <VibePanel vibe={state.vibe} agents={state.codingAgents} rootPath={state.project.rootPath} changeBatches={state.changeBatches} checks={state.project.checkCommands} verificationRuns={state.verificationRuns} verifying={runningCheckIds.size > 0} history={state.vibeHistory} tasks={state.tasks} onChangeFolder={() => void chooseWorkspace()} onShowProgress={() => setActiveTab("progress")} onSend={send} onOpenFile={(path, line) => send({ type: "open_file", payload: { path, ...(line ? { line } : {}) } })} onNotice={setNotice} /> : activeTab === "progress" ? <>
           <section className="goal-card"><div><span className="eyebrow">Project goal</span><p>{state.project.goal}</p><small>{state.project.rootPath}</small></div><button className="secondary" onClick={() => void chooseWorkspace()}>Change</button></section>
           {attentionIds.size > 0 && <section className="attention-strip"><strong>{attentionIds.size} task{attentionIds.size === 1 ? "" : "s"} need attention</strong><span>Activity, stall, or regression needs verification.</span></section>}
           <TaskList project={state.project} tasks={state.tasks} changes={state.changeBatches} verifications={state.verificationRuns} attentionIds={attentionIds} onSend={send} onOpenFile={(path, line) => send({ type: "open_file", payload: { path, line } })} />

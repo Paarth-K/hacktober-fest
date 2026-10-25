@@ -81,7 +81,7 @@ code { font-family: "SFMono-Regular", Consolas, monospace; }
 .status-legend span { display: flex; align-items: center; gap: 4px; }
 .status-legend i { width: 6px; height: 6px; border-radius: 2px; }
 
-.tabs { position: sticky; top: 44px; z-index: 9; display: grid; grid-template-columns: 1fr 1fr; padding: 5px 12px; background: color-mix(in srgb, var(--bg) 93%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
+.tabs { position: sticky; top: 44px; z-index: 9; display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; padding: 5px 12px; background: color-mix(in srgb, var(--bg) 93%, transparent); backdrop-filter: blur(12px); border-bottom: 1px solid var(--border); }
 .tabs button { position: relative; padding: 8px; background: transparent; color: var(--muted); font-size: 11px; }
 .tabs button.active { color: var(--text); }
 .tabs button.active::after { position: absolute; content: ""; left: 35%; right: 35%; bottom: 1px; height: 2px; border-radius: 2px; background: var(--accent); }
@@ -200,3 +200,52 @@ h3 { margin-bottom: 5px; font-size: 11px; }
   .status-legend { gap: 5px; }
   .goal-card small { max-width: 180px; }
 }
+
+/* ---------- Build (vibe) tab ---------- */
+.vibe { display: flex; flex-direction: column; gap: 10px; }
+.vibe textarea { width: 100%; resize: vertical; font: inherit; font-size: 13px; line-height: 1.45; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); }
+.vibe input { width: 100%; min-width: 0; }
+.vibe .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.vibe .row.space { justify-content: space-between; }
+.vibe .small, .vibe small { font-size: 12px; }
+.vibe .pre { white-space: pre-wrap; }
+.vibe-prompt-title { font-size: 14px; line-height: 1.35; overflow-wrap: anywhere; }
+.vibe-busy { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; padding: 6px 0; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.8s linear infinite; flex: none; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 3s; } }
+.vibe-questions { display: flex; flex-direction: column; gap: 10px; }
+.vibe-question { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.chips, .agent-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }
+.chip.active { border-color: var(--accent-strong); background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.chip:disabled { opacity: 0.5; cursor: not-allowed; }
+.vibe-ready { display: flex; flex-direction: column; gap: 8px; }
+.vibe-ready ul, .vibe-list ul, .vibe-files { margin: 4px 0 0; padding-left: 18px; font-size: 13px; }
+.vibe-run { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--surface-2); display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.vibe-live-files { display: flex; flex-wrap: wrap; gap: 4px; }
+.file-pill { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--surface); border: 1px solid var(--border); overflow-wrap: anywhere; }
+.file-pill.create { border-color: var(--verified); } .file-pill.delete { border-color: var(--danger); } .file-pill.modify { border-color: var(--needs); }
+.vibe-log { max-height: 180px; overflow: auto; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.5; margin-top: 4px; }
+.log-line { white-space: pre-wrap; overflow-wrap: anywhere; } .log-line.tool { color: var(--accent); } .log-line.stderr { color: var(--danger); } .log-line.status { color: var(--muted); }
+.vibe-report { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--border); padding-top: 10px; }
+.vibe-summary { margin: 0; font-size: 13px; line-height: 1.5; }
+.vibe-files { list-style: none; padding-left: 0; display: flex; flex-direction: column; gap: 6px; }
+.vibe-files .file-link { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.kind { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 6px; padding: 1px 5px; border-radius: 4px; background: var(--surface-2); }
+.kind.create { color: var(--verified); } .kind.delete { color: var(--danger); } .kind.modify { color: var(--needs); }
+.vibe-list { font-size: 13px; } .vibe-list.ok strong { color: var(--verified); } .vibe-list.warn strong { color: var(--needs); }
+.notice.static { cursor: default; }
+.vibe-verify { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 10px; }
+.vibe-verify code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.run-result { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 12px; }
+.run-result.pass summary strong { color: var(--verified); } .run-result.fail summary strong, .run-result.timeout summary strong, .run-result.error summary strong { color: var(--danger); }
+.run-result pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; font-size: 11px; margin: 6px 0 0; }
+.toggle { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; }
+.toggle input { width: auto; margin-top: 2px; }
+.vibe-history ul { list-style: none; padding: 0; margin: 6px 0 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.vibe-history .text-button { text-align: left; overflow-wrap: anywhere; }
+.learning-q { font-size: 13px; border: 1px dashed var(--border); border-radius: 8px; padding: 6px 8px; }
+.vibe-folder { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: -4px; }
+.vibe-folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vibe-task { text-align: left; font-size: 12px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface-2); color: var(--text); cursor: pointer; }

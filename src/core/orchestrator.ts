@@ -26,6 +26,8 @@ import type { JsonStore, PersistedState, WorkspaceState } from "../storage/jsonS
 import { applyActivity, applyVerification, computeProgress, confirmByUser, deriveStatusFromCriteria, setCriterionByUser } from "./progress.js";
 import { generateReport } from "./report.js";
 import { runCheck } from "./verification.js";
+import { VibeController } from "../vibe/controller.js";
+import { VibeGemma } from "../vibe/gemma.js";
 
 export const MAX_BATCHES = 200;
 export const MAX_RUNS = 200;
@@ -42,6 +44,10 @@ export interface OrchestratorDeps {
   mock: boolean;
   log?: (msg: string) => void;
   now?: () => Date;
+  /** Builds the Gemma prompt-wrapper for the current preferences (defaults to local Ollama). */
+  createGemma?: (prefs: Preferences) => VibeGemma;
+  /** Overrides for the vibe controller (tests). */
+  vibe?: { env?: NodeJS.ProcessEnv; settleQuietMs?: number; settleMaxMs?: number; agentTimeoutMs?: number };
 }
 
 type Reply = (m: ServerMessage) => void;
@@ -56,6 +62,8 @@ export class Orchestrator {
   private stallTimer: ReturnType<typeof setInterval> | null = null;
   private readonly log: (m: string) => void;
   private readonly now: () => Date;
+  readonly vibe: VibeController;
+  private gemma: VibeGemma;
 
   constructor(private deps: OrchestratorDeps) {
     this.log = deps.log ?? (() => {});
@@ -63,13 +71,41 @@ export class Orchestrator {
     const { state, warning } = deps.store.load();
     if (warning) this.log(warning);
     this.state = state;
+    // A run cannot survive an engine restart: mark sessions stuck in a transient phase as failed.
+    for (const w of Object.values(state.workspaces)) {
+      w.vibeSessions = w.vibeSessions.map((v) =>
+        ["clarifying", "refining", "running", "reporting"].includes(v.phase)
+          ? { ...v, phase: "failed", error: `interrupted: the engine restarted during "${v.phase}"`, ...(v.run?.outcome === "running" ? { run: { ...v.run, outcome: "failed" as const } } : {}) }
+          : v,
+      );
+    }
     this.provider = deps.createProvider(state.preferences);
+    const makeGemma = deps.createGemma ?? ((p: Preferences) => new VibeGemma({ provider: p.modelProvider, baseUrl: process.env.OLLAMA_BASE_URL, model: process.env.OLLAMA_MODEL }));
+    this.gemma = makeGemma(state.preferences);
+    this.vibe = new VibeController({
+      workspace: () => this.ws(),
+      observer: deps.observer,
+      gemma: () => this.gemma,
+      broadcast: (m) => deps.broadcast(m),
+      persist: () => this.persist(),
+      log: this.log,
+      now: this.now,
+      verify: (command) => this.verifyCommand(command),
+      changed: () => this.deps.broadcast({ type: "state_snapshot", payload: this.snapshot() }),
+      createTask: (title, criteria, testCommand) => this.createVibeTask(title, criteria, testCommand),
+      linkBatch: (batchId, taskId) => this.linkChange(batchId, taskId),
+      runs: (ids) => (this.ws()?.verificationRuns ?? []).filter((r) => ids.includes(r.id)),
+      ...deps.vibe,
+    });
+    this.rebuildGemma = () => (this.gemma = makeGemma(this.state.preferences));
   }
+  private rebuildGemma: () => void;
 
   // ---------- lifecycle ----------
 
   async start(): Promise<void> {
     void this.refreshModelStatus();
+    void this.vibe.init().catch((e) => this.log(`agent detection failed: ${e instanceof Error ? e.message : e}`));
     const ws = this.ws();
     if (ws) await this.startObserver(ws.project.rootPath);
     this.stallTimer = setInterval(() => this.pushProgressIfChanged(), 30_000);
@@ -78,6 +114,7 @@ export class Orchestrator {
 
   async stop(): Promise<void> {
     if (this.stallTimer) clearInterval(this.stallTimer);
+    this.vibe.stop();
     await this.deps.observer.stop().catch(() => {});
     this.deps.store.flush();
   }
@@ -95,6 +132,12 @@ export class Orchestrator {
 
   private persist(): void {
     this.deps.store.save(this.state);
+  }
+
+  /** Save immediately (tests / shutdown). */
+  persistNow(): void {
+    this.deps.store.save(this.state);
+    this.deps.store.flush();
   }
 
   private iso(): string {
@@ -164,6 +207,9 @@ export class Orchestrator {
         observerRunning: this.deps.observer.isRunning(),
       },
       selectedTaskId: this.state.selectedTaskId,
+      vibe: this.vibe.current(),
+      codingAgents: this.vibe.agents,
+      vibeHistory: this.vibe.history(),
     };
   }
 
@@ -216,6 +262,7 @@ export class Orchestrator {
     ws.changeBatches = [...ws.changeBatches, stored].slice(-MAX_BATCHES);
     this.persist();
     this.deps.broadcast({ type: "change_batch", payload: stored });
+    this.vibe.onBatch(stored);
     this.pushProgress();
   }
 
@@ -228,6 +275,7 @@ export class Orchestrator {
         return reply({ type: "state_snapshot", payload: this.snapshot() });
 
       case "set_project": {
+        if (this.vibe.isBusy()) throw new Error("a coding agent run is in progress; cancel it before switching workspace");
         const rootPath = resolve(env.payload.rootPath);
         if (!existsSync(rootPath)) throw new Error(`folder does not exist: ${rootPath}`);
         let ws = this.state.workspaces[rootPath];
@@ -239,6 +287,8 @@ export class Orchestrator {
             changeBatches: [],
             verificationRuns: [],
             explanationCache: {},
+            vibeSessions: [],
+            currentVibeId: null,
           };
           this.state.workspaces[rootPath] = ws;
         } else {
@@ -344,32 +394,8 @@ export class Orchestrator {
         return;
       }
 
-      case "link_change_to_task": {
-        const ws = this.requireWs();
-        const batch = ws.changeBatches.find((b) => b.id === env.payload.changeBatchId);
-        if (!batch) throw new Error(`change batch ${env.payload.changeBatchId} not found`);
-        const prevTaskId = batch.linkedTaskId;
-        if (prevTaskId && prevTaskId !== env.payload.taskId) {
-          const prev = ws.tasks.find((t) => t.id === prevTaskId);
-          if (prev) {
-            const evIds = new Set(batch.evidence.map((e) => e.id));
-            this.putTask({
-              ...prev,
-              linkedChangeBatchIds: prev.linkedChangeBatchIds.filter((id) => id !== batch.id),
-              evidenceIds: prev.evidenceIds.filter((id) => !evIds.has(id)),
-              updatedAt: at,
-            });
-          }
-        }
-        batch.linkedTaskId = env.payload.taskId;
-        if (env.payload.taskId) {
-          this.putTask(applyActivity(this.findTask(env.payload.taskId), batch.id, batch.evidence.map((e) => e.id), batch.timestamp > at ? at : batch.timestamp));
-        }
-        this.persist();
-        this.deps.broadcast({ type: "change_batch", payload: { ...batch } });
-        this.pushProgress();
-        return;
-      }
+      case "link_change_to_task":
+        return this.linkChange(env.payload.changeBatchId, env.payload.taskId, at);
 
       case "request_breakdown": {
         const requestId = newId("bd");
@@ -424,6 +450,7 @@ export class Orchestrator {
         this.persist();
         this.deps.broadcast({ type: "preferences_updated", payload: this.state.preferences });
         if (env.payload.modelProvider && env.payload.modelProvider !== before.modelProvider) {
+          this.rebuildGemma();
           this.provider = this.deps.createProvider(this.state.preferences);
           void this.refreshModelStatus();
         }
@@ -449,7 +476,68 @@ export class Orchestrator {
 
       case "open_file":
         return reply({ type: "open_file_result", payload: this.resolveOpenFile(env.payload.path, env.payload.line) });
+
+      case "vibe_start":
+      case "vibe_answer":
+      case "vibe_skip_questions":
+      case "vibe_run":
+      case "vibe_cancel":
+      case "vibe_regenerate_report":
+      case "vibe_verify":
+      case "vibe_ask":
+      case "vibe_reset":
+      case "vibe_open":
+        await this.vibe.handle(env);
+        if (env.type === "vibe_reset" || env.type === "vibe_start" || env.type === "vibe_open") this.deps.broadcast({ type: "state_snapshot", payload: this.snapshot() });
+        return;
     }
+  }
+
+  /** Attach (or reassign / dismiss with null) a change batch to a task. Activity only; never completes a task. */
+  linkChange(changeBatchId: string, taskId: string | null, at = this.iso()): void {
+    const ws = this.requireWs();
+    const batch = ws.changeBatches.find((b) => b.id === changeBatchId);
+    if (!batch) throw new Error(`change batch ${changeBatchId} not found`);
+    const prevTaskId = batch.linkedTaskId;
+    if (prevTaskId && prevTaskId !== taskId) {
+      const prev = ws.tasks.find((t) => t.id === prevTaskId);
+      if (prev) {
+        const evIds = new Set(batch.evidence.map((e) => e.id));
+        this.putTask({
+          ...prev,
+          linkedChangeBatchIds: prev.linkedChangeBatchIds.filter((id) => id !== batch.id),
+          evidenceIds: prev.evidenceIds.filter((id) => !evIds.has(id)),
+          updatedAt: at,
+        });
+      }
+    }
+    batch.linkedTaskId = taskId;
+    if (taskId) this.putTask(applyActivity(this.findTask(taskId), batch.id, batch.evidence.map((e) => e.id), batch.timestamp > at ? at : batch.timestamp));
+    this.persist();
+    this.deps.broadcast({ type: "change_batch", payload: { ...batch } });
+    this.pushProgress();
+  }
+
+  /** Task for a Build prompt: Gemma's criteria (ticked by the user) + "tests pass" linked to the test check. */
+  createVibeTask(title: string, criteria: string[], testCommand?: string): string {
+    const ws = this.requireWs();
+    const at = this.iso();
+    let check = testCommand ? ws.project.checkCommands.find((c) => c.command === testCommand) : undefined;
+    if (testCommand && !check) {
+      check = CheckCommandSchema.parse({ id: newId("chk"), label: testCommand === "npm test" ? "Tests" : testCommand.slice(0, 60), command: testCommand });
+      ws.project = { ...ws.project, checkCommands: [...ws.project.checkCommands, check], updatedAt: at };
+    }
+    const crit = [
+      ...criteria.slice(0, check ? 4 : 5).map((text) => ({ text })),
+      ...(check ? [{ text: `Tests pass (\`${check.command}\`)`, checkCommandId: check.id }] : []),
+    ];
+    const task = this.newTask(ws, title, crit, at);
+    ws.tasks.push(task);
+    this.persist();
+    this.deps.broadcast({ type: "task_updated", payload: task });
+    this.deps.broadcast({ type: "state_snapshot", payload: this.snapshot() });
+    this.pushProgress();
+    return task.id;
   }
 
   private newTask(ws: WorkspaceState, title: string, criteria: { id?: string; text: string; checkCommandId?: string }[], at: string, milestoneId?: string): Task {
@@ -471,6 +559,19 @@ export class Orchestrator {
   }
 
   // ---------- verification ----------
+
+  /** Run an exact command the user clicked (from a vibe report), saving it as a project check if new. */
+  async verifyCommand(command: string): Promise<VerificationRun> {
+    const ws = this.requireWs();
+    let check = ws.project.checkCommands.find((c) => c.command === command);
+    if (!check) {
+      check = CheckCommandSchema.parse({ id: newId("chk"), label: command === "npm test" ? "Tests" : command.slice(0, 60), command });
+      ws.project = { ...ws.project, checkCommands: [...ws.project.checkCommands, check], updatedAt: this.iso() };
+      this.persist();
+      this.deps.broadcast({ type: "state_snapshot", payload: this.snapshot() });
+    }
+    return this.runVerification(check.id, []);
+  }
 
   async runVerification(checkCommandId: string, taskIds: string[], replyTo?: string): Promise<VerificationRun> {
     const ws = this.requireWs();

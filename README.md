@@ -1,8 +1,35 @@
 # Local Code Companion
 
-A local-first floating desktop window (Tauri 2) that sits on top of your editor or terminal and **tracks how far your project has actually progressed**. It watches the edits Claude Code, Codex, you, or any other tool make in your local workspace, attaches them to tasks as evidence, and explains them with a local Gemma model through Ollama.
+Tell it what you want changed in your project, in plain words. A local Gemma model asks a quick question if something important is unclear, writes clear instructions for **Claude Code**, and Claude makes the change while you watch. Afterwards Gemma explains what changed at your level: new to coding, learning, or experienced. Every change is kept as its own package you can go back to.
 
-Percent complete only moves when a check command **you** ran passes, or when you explicitly confirm a task. File activity and AI explanations never count as completion.
+```
+◆ Companion  ·  my-app                                                       ● ready
+╭ Changes ───────────────╮╭──────────────────────────────────────────────────────────╮
+│  + New change          ││ Ask  Progress  Learn                                     │
+│  ✔ add a contact page  ││                                                          │
+│  ● dark mode           ││ ✔ Understood your request                                │
+│                        ││ ✔ Wrote instructions for Claude                          │
+│                        ││ ⠋ Claude is making the changes  1:12                     │
+│                        ││     Editing styles.css…                                  │
+╰────────────────────────╯╰──────────────────────────────────────────────────────────╯
+ Esc stop Claude · Tab switch view · ↑↓ changes · Ctrl+C quit
+```
+
+## Open it
+
+```bash
+# one time, from this repo
+npm install
+npm link            # installs the `lcc` command
+
+# every time: from inside the project you want to change
+cd ~/path/to/your/project
+lcc                 # or: lcc ~/path/to/your/project
+```
+
+You need [Ollama](https://ollama.com) running with a Gemma model (`ollama pull gemma4:31b`), and Claude Code installed and logged in (run `claude` once). `lcc --window` opens the older floating desktop window instead.
+
+**How it works:** type what you want and press Enter. Answer Gemma's question if it asks (press a number or type your own answer). The view switches to **Progress** while Claude works, with automatic permissions (Esc stops it), and then to **Learn** when it's done. In Learn, press 1, 2 or 3 to change how technical the explanation is, Enter to reveal the quiz answer, or type a question about the change. ↑/↓ moves between your past changes.
 
 ## Prerequisites
 

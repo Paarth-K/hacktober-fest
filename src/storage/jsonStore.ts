@@ -13,6 +13,7 @@ import {
   TaskSchema,
   VerificationRunSchema,
 } from "../shared/schemas.js";
+import { VibeSessionSchema } from "../shared/vibe.js";
 
 export const APP_DIR_NAME = "local-code-companion";
 
@@ -32,6 +33,8 @@ export const WorkspaceStateSchema = z.object({
   verificationRuns: z.array(VerificationRunSchema).default([]),
   /** key -> response; key = batch ids + level + question + quiz flag. */
   explanationCache: z.record(z.string(), ExplanationResponseSchema).default({}),
+  vibeSessions: z.array(VibeSessionSchema).default([]),
+  currentVibeId: z.string().nullable().default(null),
 });
 export type WorkspaceState = z.infer<typeof WorkspaceStateSchema>;
 

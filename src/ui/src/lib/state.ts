@@ -27,6 +27,9 @@ export const initialUiState: UiState = {
   explanation: null,
   breakdown: null,
   runningVerificationChecks: {},
+  vibe: null,
+  codingAgents: [],
+  vibeHistory: [],
 };
 
 export function applyEngineEvent(state: UiState, event: ServerEnvelope): UiState {
@@ -71,6 +74,15 @@ export function applyEngineEvent(state: UiState, event: ServerEnvelope): UiState
       return { ...state, modelStatus: event.payload };
     case "preferences_updated":
       return { ...state, preferences: event.payload };
+    case "vibe_updated":
+      // Keep the incoming session's events if it is the same session (agent events stream separately).
+      return { ...state, vibe: event.payload };
+    case "vibe_agent_event":
+      return state.vibe?.id === event.payload.vibeId
+        ? { ...state, vibe: { ...state.vibe, events: [...state.vibe.events, event.payload.event].slice(-300) } }
+        : state;
+    case "coding_agents":
+      return { ...state, codingAgents: event.payload };
     case "open_file_result":
     case "report_ready":
     case "error":

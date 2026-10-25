@@ -26,6 +26,9 @@ export interface EngineOptions {
   modelProvider?: "auto" | "mock" | "ollama";
   /** Preselect this workspace folder at startup (LCC_WORKSPACE), as if the user had chosen it. */
   workspace?: string;
+  /** Test hooks: Gemma factory and vibe controller overrides. */
+  gemma?: ConstructorParameters<typeof Orchestrator>[0]["createGemma"];
+  vibe?: ConstructorParameters<typeof Orchestrator>[0]["vibe"];
 }
 
 export interface RunningEngine {
@@ -56,6 +59,8 @@ export async function startEngine(opts: EngineOptions = {}): Promise<RunningEngi
         ollamaModel: process.env.OLLAMA_MODEL,
       }),
     broadcast,
+    ...(opts.gemma ? { createGemma: opts.gemma } : {}),
+    ...(opts.vibe ? { vibe: opts.vibe } : {}),
     sessionId,
     version: ENGINE_VERSION,
     mock,
@@ -99,6 +104,8 @@ export async function startEngine(opts: EngineOptions = {}): Promise<RunningEngi
 
 function seedFromFixture(o: Orchestrator): void {
   const f = loadDemoFixture();
+  // Under the OS temp dir, not a hard-coded /tmp (which becomes C:\tmp on Windows).
+  f.project.rootPath = join(tmpdir(), "lcc-demo-workspace");
   mkdirSync(f.project.rootPath, { recursive: true });
   o.state.activeRootPath = f.project.rootPath;
   o.state.workspaces[f.project.rootPath] = {
@@ -108,6 +115,8 @@ function seedFromFixture(o: Orchestrator): void {
     changeBatches: f.changeBatches,
     verificationRuns: f.verificationRuns,
     explanationCache: {},
+    vibeSessions: [],
+    currentVibeId: null,
   };
 }
 
