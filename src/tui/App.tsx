@@ -32,10 +32,23 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
   const [scroll, setScroll] = useState(0);
   const [contentH, setContentH] = useState(0);
   const prevPhase = useRef<{ id?: string; phase?: VibePhase }>({});
+  // Each launch is a fresh session: the Changes list only shows changes made since the app opened.
+  const [sessionStart] = useState(() => new Date(Date.now() - 1000).toISOString());
+  const resetSent = useRef(false);
 
   useEffect(() => {
     const offs = [
-      client.onState(setConn),
+      client.onState((s) => {
+        setConn(s);
+        if (s === "open" && !resetSent.current) {
+          resetSent.current = true;
+          try {
+            client.send({ type: "vibe_reset", payload: {} });
+          } catch {
+            /* engine will send a snapshot anyway */
+          }
+        }
+      }),
       client.onAny((e) => {
         if (e.type === "error") setToast(friendlyError(e.payload.message));
         setUi((s) => applyEngineEvent(s, e));
@@ -54,11 +67,11 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
   const level: Level = vibe?.level ?? ui.preferences.level;
   const task = vibe?.taskId ? ui.tasks.find((t) => t.id === vibe.taskId) : undefined;
   const history = useMemo(() => {
-    const h = ui.vibeHistory.map((x) => (vibe && x.id === vibe.id ? { ...x, phase: vibe.phase } : x));
+    const h = ui.vibeHistory.filter((x) => x.createdAt >= sessionStart).map((x) => (vibe && x.id === vibe.id ? { ...x, phase: vibe.phase } : x));
     return vibe && !h.some((x) => x.id === vibe.id)
       ? [{ id: vibe.id, createdAt: vibe.createdAt, originalPrompt: vibe.originalPrompt, agent: vibe.agent, phase: vibe.phase, filesChanged: 0, verified: "none" as const }, ...h]
       : h;
-  }, [ui.vibeHistory, vibe]);
+  }, [ui.vibeHistory, vibe, sessionStart]);
 
   // Follow the work: switch panes on meaningful phase transitions of the current change.
   useEffect(() => {
@@ -144,6 +157,7 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
       onQuit?.();
       return exit();
     }
+    if (key.ctrl && input === "n") return openChange(0);
     if (key.tab) {
       const i = PANES.indexOf(pane);
       setScroll(0);
@@ -252,7 +266,7 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
 }
 
 function hints(pane: Pane, phase: VibePhase | undefined, busy: boolean): string {
-  const nav = "Tab switch view · ↑↓ changes · Ctrl+C quit";
+  const nav = "Ctrl+N new change · Tab switch view · ↑↓ changes · Ctrl+C quit";
   if (phase === "running") return `Esc stop Claude · ${nav}`;
   if (pane === "ask") return phase === "awaiting_answers" ? `Enter answer · Esc cancel · ${nav}` : `Enter send · ${nav}`;
   if (pane === "learn") return `1-3 explanation level · Enter ask / show quiz answer · ${nav}`;
