@@ -34,8 +34,8 @@ export interface ModelProvider {
   /** Explanation, follow-up (request.question set) and quiz (request.wantQuiz). Must return a validated response with only citations present in request.context. */
   explain(request: ExplanationRequest): Promise<ExplanationResponse>;
   breakdown(request: TaskBreakdownRequest): Promise<TaskBreakdownSuggestion>;
-  /** Optional plain-language summary that only restates the snapshot. */
-  summarizeProgress?(input: ProgressReportInput): Promise<string>;
+  /** Optional plain-language summary that only restates the snapshot. source says whether a model or a template wrote it. */
+  summarizeProgress?(input: ProgressReportInput): Promise<{ text: string; source: "template" | "model" }>;
 }
 
 // ---------- Observer + context (P2) ----------

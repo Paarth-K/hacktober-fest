@@ -8,7 +8,7 @@ export interface ReportInput {
   verificationRuns: VerificationRun[];
   changeBatches: ChangeBatch[];
   /** Optional model-written summary; rendered in a clearly labeled section. */
-  aiSummary?: { text: string; provider: string; mode: "real" | "mock" };
+  summary?: { text: string; provider: string; mode: "real" | "mock"; source: "template" | "model" };
   now?: Date;
 }
 
@@ -77,8 +77,10 @@ export function generateReport(input: ReportInput): string {
   if (failing.length === 0) lines.push(verificationRuns.length ? "_No failing checks in the latest runs._" : "_No checks have been run._", "");
   for (const r of failing) lines.push(`- ${runText(r)}`, "", "```", r.outputTail.slice(-800), "```", "");
 
-  if (input.aiSummary) {
-    lines.push(`## Summary (${input.aiSummary.mode === "mock" ? "MOCK — not a real model" : `AI-written by ${input.aiSummary.provider}`}; restates the facts above)`, "", input.aiSummary.text, "");
+  if (input.summary) {
+    const label =
+      input.summary.source === "template" ? "deterministic template" : input.summary.mode === "mock" ? "MOCK — not a real model" : `AI-written by ${input.summary.provider}`;
+    lines.push(`## Summary (${label}; restates the facts above)`, "", input.summary.text, "");
   }
   return lines.join("\n");
 }
