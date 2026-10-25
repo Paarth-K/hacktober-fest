@@ -19,6 +19,7 @@ import {
   TaskSchema,
   VerificationRunSchema,
 } from "./schemas.js";
+import { CodingAgentInfoSchema, VibeClientMessages, VibeHistoryItemSchema, VibeServerMessages, VibeSessionSchema } from "./vibe.js";
 
 const msg = <T extends string, P extends z.ZodTypeAny>(type: T, payload: P) =>
   z.object({ type: z.literal(type), payload });
@@ -113,6 +114,7 @@ export const ClientMessageSchema = z.discriminatedUnion("type", [
   msg("window_mode_changed", z.object({ compact: z.boolean(), alwaysOnTop: z.boolean().optional() })),
   /** Ask for a fresh state_snapshot (e.g. after reconnect). */
   msg("request_snapshot", z.object({})),
+  ...VibeClientMessages,
 ]);
 export type ClientMessage = z.infer<typeof ClientMessageSchema>;
 export type ClientMessageType = ClientMessage["type"];
@@ -139,6 +141,11 @@ export const StateSnapshotSchema = z.object({
   modelStatus: ModelStatusSchema,
   engine: EngineInfoSchema,
   selectedTaskId: IdSchema.nullable(),
+  /** Current vibe session for the active workspace, if any. */
+  vibe: VibeSessionSchema.nullable().default(null),
+  codingAgents: z.array(CodingAgentInfoSchema).default([]),
+  /** Past vibe sessions for this workspace, newest first. */
+  vibeHistory: z.array(VibeHistoryItemSchema).default([]),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshotSchema>;
 
@@ -163,6 +170,7 @@ export const ServerMessageSchema = z.discriminatedUnion("type", [
   ),
   /** Non-fatal error for a specific client request (replyTo set on envelope). */
   msg("error", z.object({ code: z.string(), message: z.string() })),
+  ...VibeServerMessages,
 ]);
 export type ServerMessage = z.infer<typeof ServerMessageSchema>;
 export type ServerMessageType = ServerMessage["type"];

@@ -19,7 +19,8 @@
     "gate:live": "tsx scripts/e2e-gate.ts --provider=auto",
     "smoke:gemma": "tsx scripts/live-gemma-smoke.ts",
     "demo": "node scripts/demo.mjs",
-    "demo:agent": "node scripts/demo-agent.mjs"
+    "demo:agent": "node scripts/demo-agent.mjs",
+    "start": "node bin/lcc.mjs"
   },
   "repository": {
     "type": "git",
@@ -32,6 +33,7 @@
   "homepage": "https://github.com/Paarth-K/hacktober-fest#readme",
   "private": true,
   "dependencies": {
+    "@openai/codex-sdk": "0.164.0",
     "@tauri-apps/api": "^2.12.4",
     "@tauri-apps/plugin-dialog": "^2.8.3",
     "@tauri-apps/plugin-opener": "^2.7.2",
@@ -53,5 +55,8 @@
     "typescript": "^7.0.2",
     "vite": "^8.3.5",
     "vitest": "^5.0.5"
+  },
+  "bin": {
+    "lcc": "bin/lcc.mjs"
   }
 }
