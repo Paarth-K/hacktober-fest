@@ -1,7 +1,7 @@
 // P4 integration gate: drives the REAL engine (real observer, real checks, configured model) over the
 // loopback WebSocket against a fresh temp workspace with real, uncommitted file edits.
-//   npx tsx scripts/e2e-gate.ts                 # model per LCC_MODEL_PROVIDER (default auto)
-//   LCC_MODEL_PROVIDER=mock npx tsx scripts/e2e-gate.ts
+//   npx tsx scripts/e2e-gate.ts --provider=mock   # deterministic mock AI
+//   npx tsx scripts/e2e-gate.ts --provider=auto   # live Ollama/Gemma if available (labeled mock otherwise)
 // Prints one PASS/FAIL line per step and exits non-zero on any FAIL.
 import { mkdirSync, mkdtempSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,10 @@ const record = (step: string, ok: boolean, detail = "") => {
 const root = mkdtempSync(join(tmpdir(), "lcc-gate-ws-"));
 const dataDir = mkdtempSync(join(tmpdir(), "lcc-gate-data-"));
 const node = JSON.stringify(process.execPath);
-const provider = (process.env.LCC_MODEL_PROVIDER as "auto" | "mock" | "ollama" | undefined) ?? "auto";
+// --provider=mock|auto|ollama (cross-platform; npm runs scripts in cmd.exe on Windows) or LCC_MODEL_PROVIDER.
+const providerArg = process.argv.find((a) => a.startsWith("--provider="))?.split("=")[1];
+const provider = (providerArg ?? process.env.LCC_MODEL_PROVIDER ?? "auto") as "auto" | "mock" | "ollama";
+if (!["auto", "mock", "ollama"].includes(provider)) throw new Error(`invalid provider: ${provider}`);
 
 let engine: RunningEngine;
 let client: EngineClient;

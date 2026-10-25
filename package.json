@@ -15,8 +15,8 @@
     "test": "vitest run",
     "check": "npm run typecheck && npm test && npm run test:ai",
     "test:ai": "tsx --test src/ai/tests/providers.node.ts",
-    "gate": "LCC_MODEL_PROVIDER=mock tsx scripts/e2e-gate.ts",
-    "gate:live": "LCC_MODEL_PROVIDER=auto tsx scripts/e2e-gate.ts",
+    "gate": "tsx scripts/e2e-gate.ts --provider=mock",
+    "gate:live": "tsx scripts/e2e-gate.ts --provider=auto",
     "smoke:gemma": "tsx scripts/live-gemma-smoke.ts"
   },
   "repository": {

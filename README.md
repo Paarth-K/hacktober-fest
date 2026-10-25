@@ -41,7 +41,6 @@ npm run dev          # engine + floating Tauri window (real mode, your workspace
 | `npm run gate:live` | Same gate using live Ollama/Gemma (set `OLLAMA_MODEL`) |
 | `npm run smoke:gemma` | Live Gemma explanation / follow-up / breakdown through the engine's adapter |
 
-> Windows: the `gate` scripts use a POSIX env prefix. In PowerShell run `$env:LCC_MODEL_PROVIDER="mock"; npx tsx scripts/e2e-gate.ts`.
 
 ## Demo walkthrough
 
@@ -88,7 +87,7 @@ Machine B: macOS arm64, Node 24.21, rustc 1.99, Ollama `gemma4:31b`, `integratio
 | `npm run gate`: real uncommitted create/modify/delete → real hunks, `.env` excluded, suggested link not auto-applied, 0% after activity, failing check does not complete, passing check → verified (50%), report saved, relaunch persists | 19/19 PASS |
 | `npm run gate:live` with `gemma4:31b`: same + live explanation (17.6 s, 2 quiz questions, valid citations) + live follow-up (9.3 s) | 19/19 PASS |
 | Independent live Gemma on a second machine (P3 on A, P4 on B) | PASS on both |
-| Windows 11 (P2, Node 24.19): `npm run check`, `npm run gate` with mock AI (real observer, real edits, real checks) | PASS (P2) |
+| Windows 11 (P2, Node 24.19): `npm run check`, e2e gate with mock AI (real observer, real edits, real checks) | PASS (P2) |
 | Tauri window / UI on Windows; anything on Linux; live Gemma on Windows | **NOT TESTED** |
 
 ## Known limitations
