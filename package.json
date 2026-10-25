@@ -13,7 +13,11 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && npm run test:ai",
+    "test:ai": "tsx --test src/ai/tests/providers.node.ts",
+    "gate": "tsx scripts/e2e-gate.ts --provider=mock",
+    "gate:live": "tsx scripts/e2e-gate.ts --provider=auto",
+    "smoke:gemma": "tsx scripts/live-gemma-smoke.ts"
   },
   "repository": {
     "type": "git",

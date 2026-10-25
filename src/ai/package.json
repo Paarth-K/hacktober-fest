@@ -1,0 +1,20 @@
+{
+  "name": "@local-code-companion/ai",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "tsx --test tests/*.node.ts",
+    "typecheck": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node index.ts tests/*.ts ../skills/*.ts",
+    "smoke:live": "tsx tests/live-smoke.ts",
+    "smoke:observed": "tsx tests/observed-smoke.ts",
+    "smoke:status": "tsx tests/status-smoke.ts"
+  },
+  "dependencies": {
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
