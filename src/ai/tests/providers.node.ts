@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { boundContext, isSafeContextPath, validateCitations, MockProvider, OllamaProvider, LearningService, ModelError, parseModelJson, summarizeProgress, TaskBreakdownSuggestionSchema } from '../index.js';
+import { boundContext, isSafeContextPath, validateProseReferences, validateCitations, MockProvider, OllamaProvider, LearningService, ModelError, parseModelJson, summarizeProgress, TaskBreakdownSuggestionSchema } from '../index.js';
 import { request, responseBody } from './fixtures.js';
 
 function fakeFetch(body: unknown): typeof fetch {
@@ -114,4 +114,25 @@ test('status never throws for offline, missing model, invalid/oversized response
     async (_url, init) => new Promise((_resolve, reject) => init!.signal!.addEventListener('abort', () => reject(new Error('abort')))),
   ];
   for (const fetcher of fetchers) assert.equal((await new OllamaProvider({ model: 'test', timeoutMs: 5, fetch: fetcher }).status()).state, 'offline');
+});
+
+
+test('P4 regression: Express JSON method calls are not file citations', async () => {
+  for (const summary of [
+    'The server now calls express.json() to parse bodies.',
+    'It reads req.body and calls res.json({ token }).',
+    'Use response.json () to decode the response.',
+  ]) {
+    validateProseReferences(summary, boundContext(request.context));
+    const output = await provider({ ...responseBody, summary }).explain(request);
+    assert.equal(output.mode, 'live');
+  }
+});
+test('prose validator keeps explicit path checks, resolves unique basenames, and checks all supplied spans', () => {
+  const base = request.context.excerpts[0]!;
+  const packet = boundContext({ ...request.context, excerpts: [base, { ...base, evidence: { ...base.evidence, id: 'later', startLine: 10, endLine: 12 } }] });
+  validateProseReferences('See src/cart.ts:1-3 and cart.ts:10-12.', packet);
+  for (const text of ['See src/invented.ts()', 'See src/cart.ts:999()', 'See cart.ts:3-11.', 'See src/cart.ts:3-1.', 'See cart.ts:99.']) {
+    assert.throws(() => validateProseReferences(text, packet), /Unsupported/, text);
+  }
 });
