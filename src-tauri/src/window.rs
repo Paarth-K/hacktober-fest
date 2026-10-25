@@ -31,8 +31,11 @@ pub fn set_compact_mode(app: AppHandle, compact: bool) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+// Must be async: synchronous Tauri commands run on the main thread, and blocking_pick_folder()
+// waits for a dialog that itself needs the main thread, which deadlocks the app on macOS
+// ("crashes" as soon as Choose folder is clicked). Async commands run on the async runtime instead.
 #[tauri::command]
-pub fn pick_workspace(app: AppHandle) -> Option<String> {
+pub async fn pick_workspace(app: AppHandle) -> Option<String> {
     app.dialog()
         .file()
         .blocking_pick_folder()
