@@ -143,7 +143,8 @@ function syntheticBatch(sessionId: string): ChangeBatch {
   };
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("main.ts");
+// Only when run as `tsx src/engine/main.ts` (never when bundled into the lcc CLI).
+const isMain = /[\\/]engine[\\/]main\.ts$/.test(process.argv[1] ?? "");
 if (isMain) {
   const mock = process.argv.includes("--mock") || process.env.LCC_MOCK === "1";
   const engine = await startEngine({
