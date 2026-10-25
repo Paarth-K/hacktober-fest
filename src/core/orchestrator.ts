@@ -392,16 +392,16 @@ export class Orchestrator {
       case "export_report": {
         const ws = this.requireWs();
         const snapshot = this.progress()!;
-        let aiSummary: { text: string; provider: string; mode: "real" | "mock" } | undefined;
+        let summary: { text: string; provider: string; mode: "real" | "mock"; source: "template" | "model" } | undefined;
         if (this.provider.summarizeProgress) {
           try {
-            const text = await this.provider.summarizeProgress({ projectName: ws.project.name, goal: ws.project.goal, snapshot, tasks: ws.tasks, verificationRuns: ws.verificationRuns });
-            if (text.trim()) aiSummary = { text: text.trim(), provider: this.provider.name, mode: this.provider.mode };
+            const s = await this.provider.summarizeProgress({ projectName: ws.project.name, goal: ws.project.goal, snapshot, tasks: ws.tasks, verificationRuns: ws.verificationRuns });
+            if (s.text.trim()) summary = { text: s.text.trim(), provider: this.provider.name, mode: this.provider.mode, source: s.source };
           } catch (e) {
             this.log(`summarizeProgress failed: ${e instanceof Error ? e.message : e}`);
           }
         }
-        const markdown = generateReport({ project: ws.project, tasks: ws.tasks, snapshot, verificationRuns: ws.verificationRuns, changeBatches: ws.changeBatches, aiSummary, now: this.now() });
+        const markdown = generateReport({ project: ws.project, tasks: ws.tasks, snapshot, verificationRuns: ws.verificationRuns, changeBatches: ws.changeBatches, summary, now: this.now() });
         let savedPath: string | undefined;
         if (env.payload.saveToWorkspace) {
           const dir = join(ws.project.rootPath, REPORT_DIR);

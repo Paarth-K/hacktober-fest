@@ -13,7 +13,8 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test"
+    "check": "npm run typecheck && npm test && npm run test:ai",
+    "test:ai": "tsx --test src/ai/tests/providers.node.ts"
   },
   "repository": {
     "type": "git",

@@ -5,12 +5,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createModelProvider } from "../ai/index.js";
 import { Orchestrator } from "../core/orchestrator.js";
 import { createObserver } from "../observer/index.js";
 import { newId } from "../shared/events.js";
 import { loadDemoFixture } from "../shared/fixtures.js";
 import type { ChangeBatch } from "../shared/schemas.js";
+import { createModelProvider } from "../integrations/aiAdapter.js";
 import { startBridge, type Bridge } from "../integrations/wsServer.js";
 import { JsonStore, defaultDataDir } from "../storage/jsonStore.js";
 
@@ -22,6 +22,8 @@ export interface EngineOptions {
   port?: number;
   token?: string;
   quiet?: boolean;
+  /** Overrides preferences.modelProvider (tests, LCC_MODEL_PROVIDER). */
+  modelProvider?: "auto" | "mock" | "ollama";
 }
 
 export interface RunningEngine {
@@ -47,7 +49,7 @@ export async function startEngine(opts: EngineOptions = {}): Promise<RunningEngi
     observer,
     createProvider: (prefs) =>
       createModelProvider({
-        provider: mock ? "mock" : prefs.modelProvider,
+        provider: mock ? "mock" : (opts.modelProvider ?? prefs.modelProvider),
         ollamaBaseUrl: process.env.OLLAMA_BASE_URL,
         ollamaModel: process.env.OLLAMA_MODEL,
       }),
@@ -133,6 +135,7 @@ if (isMain) {
     mock,
     port: process.env.LCC_PORT ? Number(process.env.LCC_PORT) : undefined,
     token: process.env.LCC_TOKEN || undefined,
+    modelProvider: (process.env.LCC_MODEL_PROVIDER as EngineOptions["modelProvider"]) || undefined,
   });
   process.stdout.write(`LCC_ENGINE_READY ${JSON.stringify({ port: engine.bridge.port, token: engine.bridge.token })}\n`);
   const shutdown = async () => {
