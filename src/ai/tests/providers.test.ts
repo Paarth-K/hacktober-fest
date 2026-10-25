@@ -70,6 +70,26 @@ test('task breakdowns enforce task and criterion counts', async () => {
   assert.equal((await provider({ tasks: mock.tasks }).breakdown({ goal: 'Build cart' })).mode, 'live');
 });
 test('reports preserve snapshot facts and distinguish activity from completion', () => {
-  const text = summarizeProgress({ total: 5, percentComplete: 40, criteriaMet: 2, criteriaTotal: 5, byStatus: { not_started: 1, activity_detected: 1, needs_verification: 1, verified_complete: 1, user_confirmed: 1 } });
+  const text = summarizeProgress({ total: 5, percentComplete: 0.4, criteriaMet: 2, criteriaTotal: 5, byStatus: { not_started: 1, activity_detected: 1, needs_verification: 1, verified_complete: 1, user_confirmed: 1 } });
   assert.match(text, /40%/); assert.match(text, /1 with activity detected/); assert.match(text, /Activity does not establish completion/);
+});
+
+test('prose paths and lines are grounded even when citation array is valid', async () => {
+  await assert.rejects(provider({ ...responseBody, summary: 'See src/invented.ts:99.' }).explain(request), { code: 'invalid_output' });
+  await assert.rejects(provider({ ...responseBody, summary: 'See invented.ts:99.' }).explain(request), { code: 'invalid_output' });
+  await assert.rejects(provider({ ...responseBody, summary: 'See src/cart.ts:999.' }).explain(request), { code: 'invalid_output' });
+});
+test('user-supplied secret-like values and mismatched batches never reach transport', async () => {
+  let called = false;
+  const local = new OllamaProvider({ model: 'test', fetch: async () => { called = true; throw new Error('unexpected transport'); } });
+  await assert.rejects(local.explain({ ...request, question: 'password=secretvalue123' }), /secret/);
+  await assert.rejects(local.breakdown({ goal: 'api_key=secretvalue123' }), /secret/);
+  await assert.rejects(local.explain({ ...request, changeBatchIds: ['other'] }), /batch/);
+  assert.equal(called, false);
+});
+test('HTTP failures, oversized bodies and non-JSON envelopes reject cleanly', async () => {
+  for (const [response, code] of [[new Response('offline', { status: 503 }), 'offline'], [new Response('x'.repeat(200001)), 'invalid_output'], [new Response('not json'), 'invalid_output']] as const) {
+    const local = new OllamaProvider({ model: 'test', fetch: async () => response });
+    await assert.rejects(local.explain(request), { code });
+  }
 });

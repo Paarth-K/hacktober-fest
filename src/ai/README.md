@@ -10,6 +10,7 @@ npm run --prefix src/ai typecheck
 npm test --prefix src/ai
 ollama list
 OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:live
+OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:observed
 ```
 
 Node tested: v26.7.0, macOS arm64. Node LTS, Windows and Linux have not been tested here. The tag above was actually installed on this machine; use your own installed Gemma tag. `OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434` and must resolve through a loopback hostname. Requests reject redirects. No hosted provider is implemented. The deadline budget default per request is 120 seconds.
@@ -34,7 +35,7 @@ const suggestion = await live.breakdown({ goal, promptText });
 
 Shared M0 schemas were not yet published when this module was started. `contracts.ts` is a P3-local boundary, not a replacement for P4 canonical schemas. P4 should map canonical context into the packet above; once the canonical contract is available P3 can align imports. The private nested package provides independent tests without editing P4's root scaffold. Root integration should install Zod and its test tools or use the commands above.
 
-`summarizeProgress(snapshot)` is deterministic wording from P4 facts only, always available without a model. It does not calculate percentages, render a full evidence report, execute checks, or infer completion.
+`summarizeProgress(snapshot)` is deterministic wording from P4 facts only, always available without a model. The snapshot completion value is a fraction in [0, 1] per Prompt 0 and is formatted as a percentage. It does not compute completion from tasks, render a full evidence report, execute checks, or infer completion.
 
 ## Boundaries
 

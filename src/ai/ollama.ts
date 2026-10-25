@@ -72,7 +72,7 @@ export class OllamaProvider implements ModelProvider {
     try { validateCitations(body.evidence, context); } catch { throw new ModelError('invalid_output', 'Discarded explanation with unsupported citations'); }
     if (!body.evidence.length) throw new ModelError('invalid_output', 'Model explanation is missing source citations');
     // Do not surface unsupported verification claims as grounded teaching.
-    const prose = [body.summary, ...body.behaviorChanges, ...body.concepts, ...body.concerns, ...(body.quiz ?? []).flatMap(q => [q.question, q.answer])].join('\n');
+    const prose = [body.summary, ...body.behaviorChanges, ...body.concepts, ...body.concerns, ...body.uncertainties, ...(body.quiz ?? []).flatMap(q => [q.question, q.answer])].join('\n');
     try { validateProseReferences(prose, context); } catch { throw new ModelError('invalid_output', 'Discarded explanation with an unsupported prose reference'); }
     if (/\b(?:tests?|checks?|build)\s+(?:(?:have|has|all)\s+)*(?:passed|succeeded|is passing)|\b(?:verified_complete|user_confirmed)\b|\b(?:task|project)\s+is\s+(?:complete|done)\b/i.test(prose)) {
       throw new ModelError('invalid_output', 'Discarded explanation containing an unsupported completion or verification assertion');

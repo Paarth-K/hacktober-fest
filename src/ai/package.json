@@ -5,7 +5,8 @@
   "scripts": {
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --lib ES2022,DOM --types node index.ts tests/*.ts ../skills/*.ts",
-    "smoke:live": "tsx tests/live-smoke.ts"
+    "smoke:live": "tsx tests/live-smoke.ts",
+    "smoke:observed": "tsx tests/observed-smoke.ts"
   },
   "dependencies": {
     "zod": "^4.6.7"

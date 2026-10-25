@@ -42,7 +42,7 @@ export function assertNoSecrets(input: unknown): void {
 /** Additional prose checks catch explicit fictional paths outside the citation array. */
 export function validateProseReferences(prose: string, packet: ContextPacket): void {
   const paths = new Map(packet.excerpts.map(e => [e.evidence.path, e.evidence]));
-  const mentions = prose.matchAll(/(?:[A-Za-z0-9_@.-]+\/)+[A-Za-z0-9_.-]+\.[A-Za-z0-9]+(?::(\d+)(?:[-–](\d+))?)?/g);
+  const mentions = prose.matchAll(/(?:[A-Za-z0-9_@.-]+\/)*[A-Za-z0-9_-]+\.(?:tsx?|jsx?|mjs|cjs|py|rs|go|java|json|md|txt|html|css|ya?ml|toml)(?::(\d+)(?:[-–](\d+))?)?/g);
   for (const match of mentions) {
     const path = match[0]!.split(':')[0]!;
     const known = paths.get(path);
