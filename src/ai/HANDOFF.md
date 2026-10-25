@@ -43,3 +43,13 @@ No communication branch or shared M0 foundation existed on origin at startup or 
 Three actual temporary-workspace disk edits were read before and after writing, then submitted to real Gemma. All returned valid structured explanations and citations: cart reducer initial zero (18,599 ms, beginner + quiz), trim normalization (10,691 ms, expert), bounded page size with NaN question (12,827 ms, expert). Raw observed source text and model responses are in `tests/observed-results.json`. Temporary workspace was removed. This tests live inference from disk evidence; it does not claim the P2 watcher was exercised.
 
 The short report formatter expects `percentComplete` as the fraction specified by Prompt 0, formats that value as percent, and does not recompute status-derived completion. P4 must map its canonical numeric convention explicitly if it differs.
+
+## Post-announcement integration regression — PASS
+
+P4's M3-P4-to-P3-BUG-01 reproduced a false positive: express.json() and res.json() were treated as fictional file references. Fixed in 4c210ca with provider-level regression tests. Slashless dotted call expressions are skipped; explicit paths, line ranges and citations remain grounded. Unique supplied basenames are accepted and all supplied ranges for the same file are considered.
+
+Tested a detached checkout of integration/mvp @ a4d8a77 plus fix 4c210ca (local detached commit e4fa175). `npm run check` PASS: root strict typecheck, 31 Vitest tests and 16 Node AI tests. On P3's machine A:
+
+`OLLAMA_MODEL=gemma4:31b npx tsx scripts/live-gemma-smoke.ts /tmp/p3-adapter-after-fix.json`
+
+All three canonical adapter responses returned mode:real: beginner + two quiz questions (25,558 ms), expert follow-up (10,680 ms), six-task breakdown (14,775 ms). Citation arrays had zero invalid refs. Raw receipt copied to `tests/adapter-after-fix-results.json`. This is a local adapter regression; P4's independent machine-B rerun remains P4's responsibility.
