@@ -1,7 +1,7 @@
 // "Vibe" flow: rough prompt -> Gemma clarifies (if vague) and refines -> coding agent CLI runs in the
 // workspace -> Gemma reports what actually changed (grounded in observed diffs).
 import { z } from "zod";
-import { CitationSchema, IdSchema, IsoDateSchema, RelPathSchema } from "./schemas.js";
+import { CitationSchema, IdSchema, IsoDateSchema, LevelSchema, RelPathSchema } from "./schemas.js";
 
 export const CodingAgentIdSchema = z.enum(["claude", "codex"]);
 export type CodingAgentId = z.infer<typeof CodingAgentIdSchema>;
@@ -112,6 +112,10 @@ export const VibeSessionSchema = z.object({
   vague: z.boolean().optional(),
   vaguenessReason: z.string().max(1000).optional(),
   questions: z.array(ClarifyQuestionSchema).default([]),
+  /** Explanation level for the Learn pane. */
+  level: LevelSchema.default("beginner"),
+  /** Follow-up questions asked in the Learn pane, answered by Gemma from this change's diffs. */
+  qa: z.array(z.object({ question: z.string().max(2000), answer: z.string().max(6000), at: IsoDateSchema, pending: z.boolean().default(false) })).default([]),
   /** Pause at the refined prompt for review (else the agent runs as soon as the prompt is refined). */
   review: z.boolean().default(false),
   allowCommands: z.boolean().default(false),
@@ -161,8 +165,9 @@ export const VibeClientMessages = [
       agent: CodingAgentIdSchema,
       /** Stop at the refined prompt for review instead of running the agent right away. */
       review: z.boolean().default(false),
-      /** Let the agent run shell commands without asking. */
+      /** Automatic permissions for the agent (Claude Code --permission-mode auto). */
       allowCommands: z.boolean().default(false),
+      level: LevelSchema.default("beginner"),
     }),
   ),
   msg("vibe_answer", z.object({ vibeId: IdSchema, answers: z.record(z.string(), z.string().max(2000)) })),
@@ -171,7 +176,10 @@ export const VibeClientMessages = [
   /** Run the (possibly user-edited) refined prompt. */
   msg("vibe_run", z.object({ vibeId: IdSchema, prompt: z.string().min(1).max(20_000), agent: CodingAgentIdSchema, allowCommands: z.boolean().default(false) })),
   msg("vibe_cancel", z.object({ vibeId: IdSchema })),
-  msg("vibe_regenerate_report", z.object({ vibeId: IdSchema })),
+  /** Rewrite the explanation, optionally at a different level. */
+  msg("vibe_regenerate_report", z.object({ vibeId: IdSchema, level: LevelSchema.optional() })),
+  /** Ask Gemma a question about this change (answered from its diffs, at the session level). */
+  msg("vibe_ask", z.object({ vibeId: IdSchema, question: z.string().min(1).max(2000) })),
   /** User clicked "Run tests" on the report: run this exact command in the workspace (saved as a project check). */
   msg("vibe_verify", z.object({ vibeId: IdSchema, command: z.string().min(1).max(1000) })),
   /** Forget the current session and start over (history is kept). */

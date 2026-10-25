@@ -3,7 +3,7 @@
 // Talks to local Ollama only. Every model output is schema-validated; failures fall back to a
 // deterministic template that is labeled as such (never presented as model output).
 import { z } from "zod";
-import type { ContextPacket, VerificationRun } from "../shared/schemas.js";
+import type { ContextPacket, Level, VerificationRun } from "../shared/schemas.js";
 import type { ClarifyQuestion, GemmaSource, VibeReport } from "../shared/vibe.js";
 
 export interface GemmaOptions {
@@ -37,6 +37,7 @@ export interface RefineResult {
   source: GemmaSource;
 }
 export interface ReportInput {
+  level?: Level;
   originalPrompt: string;
   refinedPrompt: string;
   agentName: string;
@@ -55,6 +56,14 @@ If there is consequential ambiguity, ask at most 3 short, specific questions (fe
 ${UNTRUSTED}
 Return JSON: {"vague": boolean, "reason": "one sentence", "questions": [{"question": "...", "why": "...", "options": ["..."]}]} ("questions" is [] when not vague).`;
 
+/** How to ask clarifying questions for each audience. Beginners never get technical questions. */
+export const CLARIFY_STYLE: Record<Level, string> = {
+  beginner:
+    "THE DEVELOPER IS NOT TECHNICAL. Never ask about technology or implementation choices (frameworks, libraries, auth methods, tokens, databases, storage, APIs, endpoints, file formats, architecture). Decide those yourself with the simplest option that fits the existing code and do not mention them. Ask at most 2 questions, only about what they want to SEE or HAPPEN (look, wording, who can do what, what happens when something goes wrong), in everyday words a non-programmer understands. Options must also be in everyday words.",
+  intermediate: "The developer is learning to code. Prefer questions about behavior; ask about a technical choice only if it clearly matters, and explain it in a few words.",
+  expert: "The developer is experienced; technical questions are fine.",
+};
+
 const RECHECK_NOTE = "The developer already answered the clarifications below. Only ask again if a CONSEQUENTIAL gap remains that the answers did not settle; otherwise return vague=false.";
 
 const REFINE_SYSTEM = `You write the final prompt that will be sent to an autonomous coding agent working in the developer's repository.
@@ -66,11 +75,24 @@ Return JSON: {"title": "...", "refinedPrompt": "...", "assumptions": ["..."], "a
 
 const REPORT_SYSTEM = `You explain to a developer what a coding agent actually changed in their repository, based ONLY on the observed diffs provided.
 Never claim something changed unless the diff shows it. Never claim code works, tests pass, or the task is complete: diffs are not verification. The agent's own final message is a claim, not evidence; if it claims something the diffs do not show, say so.
-For each changed file give one plain-language line. List which parts of the request the diffs address and which are not visible in the diffs. Note risks, and design tradeoffs only when the diff actually shows a choice. Suggest concrete next steps (e.g. run tests).
+For each changed file give one plain-language line. List which parts of the request the diffs address. "notAddressed" lists ONLY parts of the developer's own request that the diffs do not show, phrased in the developer's terms; never list testing/verification status, missing diffs, or files the agent chose not to use. Note risks, and design tradeoffs only when the diff actually shows a choice. Suggest concrete next steps (e.g. run tests).
 Add one short learning question (with its answer) that helps the developer understand an idea used in this change, grounded in the diff.
 Cite evidence with exact paths and line ranges from the provided evidence list only.
 ${UNTRUSTED}
 Return JSON: {"summary": "2-4 sentences", "files": [{"path": "...", "what": "..."}], "addressed": ["..."], "notAddressed": ["..."], "risks": ["..."], "tradeoffs": ["..."], "nextSteps": ["..."], "learningQuestion": {"question": "...", "answer": "..."}, "citations": [{"path": "...", "startLine": 1, "endLine": 1}]}.`;
+
+/** Audience instructions for explanations. */
+export const LEVEL_STYLE: Record<Level, string> = {
+  beginner:
+    "AUDIENCE: someone new to coding. Use plain, friendly language and short sentences. Avoid jargon; when a technical word is unavoidable, explain it in a few words. Explain what the change means for what the app does or looks like, then briefly how. Use an everyday analogy when it helps.",
+  intermediate: "AUDIENCE: someone learning to code. Explain what changed and how it works, naming the concepts involved (components, functions, state, routes...) with one-line explanations.",
+  expert: "AUDIENCE: an experienced developer. Be concise and precise: behavior changes, design choices, risks. No basic explanations.",
+};
+
+const ANSWER_SYSTEM = `You answer a developer's question about a change a coding agent just made to their repository, using ONLY the provided diffs, report and excerpts.
+If the answer is not in the provided material, say so plainly and suggest what to look at. Never claim code works or tests pass unless verification results are provided.
+${UNTRUSTED}
+Return JSON: {"answer": "..."}.`;
 
 const ClarifyOut = z.object({
   vague: z.boolean(),
@@ -179,22 +201,42 @@ export class VibeGemma {
   }
 
   /** prior = clarifications already answered (re-check round). */
-  async clarify(prompt: string, ws: WorkspaceSummary, prior: z.infer<typeof QA>[] = []): Promise<ClarifyResult> {
-    const system = prior.length ? `${CLARIFY_SYSTEM}\n${RECHECK_NOTE}` : CLARIFY_SYSTEM;
+  async clarify(prompt: string, ws: WorkspaceSummary, prior: z.infer<typeof QA>[] = [], level: Level = "intermediate"): Promise<ClarifyResult> {
+    const system = `${CLARIFY_SYSTEM}\n${CLARIFY_STYLE[level]}${prior.length ? `\n${RECHECK_NOTE}` : ""}`;
     const out = await this.chat(system, { request: prompt, ...(prior.length ? { answeredClarifications: prior } : {}), workspace: ws }, ClarifyOut);
     if (out) {
       const base = prior.length;
-      const questions = out.value.vague ? out.value.questions.slice(0, 3).map((q, i) => ({ id: `q${base + i + 1}`, ...q })) : [];
+      const max = level === "beginner" ? 2 : 3;
+      const questions = out.value.vague ? out.value.questions.slice(0, max).map((q, i) => ({ id: `q${base + i + 1}`, ...q })) : [];
       return { vague: out.value.vague && questions.length > 0, reason: out.value.reason, questions, source: out.source };
     }
     // Template fallback never re-asks after answers.
     return prior.length ? { vague: false, reason: "Clarifications received (template check; no model).", questions: [], source: this.template() } : { ...templateClarify(prompt), source: this.template() };
   }
 
-  async refine(prompt: string, qa: { question: string; answer: string }[], ws: WorkspaceSummary): Promise<RefineResult> {
-    const out = await this.chat(REFINE_SYSTEM, { request: prompt, clarifications: qa, workspace: ws }, RefineOut);
+  async refine(prompt: string, qa: { question: string; answer: string }[], ws: WorkspaceSummary, level: Level = "intermediate"): Promise<RefineResult> {
+    const titleStyle = level === "beginner" ? "\nWrite the task title and acceptance criteria in everyday, non-technical words." : "";
+    const out = await this.chat(REFINE_SYSTEM + titleStyle, { request: prompt, clarifications: qa, workspace: ws }, RefineOut);
     if (out) return { title: out.value.title.trim(), refinedPrompt: out.value.refinedPrompt.trim(), assumptions: out.value.assumptions, acceptanceCriteria: out.value.acceptanceCriteria, source: out.source };
     return { ...templateRefine(prompt, qa), source: this.template() };
+  }
+
+  async answer(question: string, level: Level, input: { originalPrompt: string; reportSummary?: string; context: ContextPacket; previous: { question: string; answer: string }[] }): Promise<AnswerResult> {
+    const out = await this.chat(
+      `${ANSWER_SYSTEM}\n${LEVEL_STYLE[level]}`,
+      {
+        question,
+        request: input.originalPrompt,
+        report: input.reportSummary,
+        diffs: boundDiffs(input.context, 20_000),
+        excerpts: input.context.excerpts.slice(0, 20).map((x) => ({ path: x.path, lines: `${x.startLine}-${x.endLine}`, text: x.text.slice(0, 2000) })),
+        notFound: input.context.missing,
+        earlierQuestions: input.previous.slice(-3),
+      },
+      AnswerOut,
+    );
+    if (out) return { answer: out.value.answer, source: out.source };
+    return { answer: `Gemma isn't available right now (${this.lastFailure ?? "no model"}), so this question can't be answered. Start Ollama and ask again.`, source: this.template() };
   }
 
   async report(input: ReportInput): Promise<ReportBody> {
@@ -217,7 +259,7 @@ export class VibeGemma {
     }
     const evidence = input.context.evidence.map((e) => ({ path: e.path, startLine: e.startLine, endLine: e.endLine }));
     const out = await this.chat(
-      REPORT_SYSTEM,
+      `${REPORT_SYSTEM}\n${LEVEL_STYLE[input.level ?? "intermediate"]}`,
       {
         request: input.originalPrompt,
         refinedPrompt: input.refinedPrompt,
@@ -266,6 +308,13 @@ function jsonSchema(schema: z.ZodType): object | "json" {
     return "json";
   }
 }
+
+export interface AnswerResult {
+  answer: string;
+  source: GemmaSource;
+}
+
+export const AnswerOut = z.object({ answer: z.string().min(1).max(6000) });
 
 // ---------- deterministic fallbacks (clearly labeled "template" by callers) ----------
 

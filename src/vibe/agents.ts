@@ -15,7 +15,10 @@ import type { CodingAgentId, CodingAgentInfo, VibeAgentEvent } from "../shared/v
 export const CLAUDE_DENY = ["Read(./.env*)", "Read(**/.env*)", "Edit(./.env*)", "Read(**/*.pem)", "Read(**/*.key)", "Bash(cat .env*)"];
 
 export interface RunOptions {
-  /** Let the agent run shell commands (tests, installs) without asking. Off by default. */
+  /**
+   * Automatic permissions: Claude Code `--permission-mode auto` (it edits files and runs commands without asking,
+   * using its own safety classifier). Off = `acceptEdits` (file edits only, shell commands denied).
+   */
   allowCommands: boolean;
 }
 
@@ -32,10 +35,10 @@ export const AGENTS: Record<CodingAgentId, AgentDescriptor> = {
     id: "claude",
     name: "Claude Code",
     display: (o) =>
-      `claude -p <refined prompt> --output-format stream-json --verbose --permission-mode acceptEdits${o.allowCommands ? " --allowedTools Bash" : ""} --disallowedTools ${CLAUDE_DENY.map((d) => `"${d}"`).join(" ")}`,
+      `claude -p <refined prompt> --output-format stream-json --verbose --permission-mode ${o.allowCommands ? "auto" : "acceptEdits"} --disallowedTools ${CLAUDE_DENY.map((d) => `"${d}"`).join(" ")}`,
     permissions: (o) =>
       o.allowCommands
-        ? "Edits files and runs shell commands in the workspace without asking. .env/key files are blocked."
+        ? "Automatic permissions: edits files and runs commands without asking (Claude's auto mode). .env/key files are blocked."
         : "Edits files in the workspace (auto-accepted). Shell commands are denied. .env/key files are blocked.",
   },
   codex: {
@@ -65,8 +68,7 @@ export function claudeCommand(prompt: string, o: RunOptions, env: NodeJS.Process
       "stream-json",
       "--verbose",
       "--permission-mode",
-      "acceptEdits",
-      ...(o.allowCommands ? ["--allowedTools", "Bash"] : []),
+      o.allowCommands ? "auto" : "acceptEdits",
       "--disallowedTools",
       ...CLAUDE_DENY,
     ],
@@ -186,7 +188,7 @@ function runClaude(opts: RunAgentOptions): AgentRunHandle {
     detached: process.platform !== "win32",
     shell: useShell(bin),
   });
-  ev("status", `Started Claude Code in the workspace${opts.allowCommands ? " (shell commands allowed)" : ""}`);
+  ev("status", `Started Claude Code in the workspace${opts.allowCommands ? " (automatic permissions)" : ""}`);
 
   let buf = "";
   child.stdout?.on("data", (d: Buffer) => {

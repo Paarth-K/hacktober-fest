@@ -21,6 +21,8 @@ export function App() {
   const [activeTab, setActiveTab] = useState<"build" | "progress" | "learn">("build");
   const [report, setReport] = useState("");
   const clientRef = useRef<EngineClient | null>(null);
+  /** Folder we asked the engine to switch to; its notice clears when the engine confirms it. */
+  const pendingRootRef = useRef<string | null>(null);
   const stateRef = useRef(state);
 
   useEffect(() => { stateRef.current = state; }, [state]);
@@ -52,6 +54,10 @@ export function App() {
     });
 
     const handleServerEvent = (event: ServerEnvelope) => {
+      if (event.type === "state_snapshot" && pendingRootRef.current && event.payload.project?.rootPath === pendingRootRef.current) {
+        pendingRootRef.current = null;
+        setNotice("");
+      }
       if (event.type === "report_ready") {
         setReport(event.payload.markdown);
         setNotice(event.payload.savedPath ? `Report saved to ${event.payload.savedPath}` : "Report ready to copy.");
@@ -120,8 +126,10 @@ export function App() {
       if (!("__TAURI_INTERNALS__" in window)) setNotice("Workspace selection is available in the Tauri app.");
       return;
     }
-    send({ type: "set_project", payload: { rootPath, ...(state.project?.goal ? { goal: state.project.goal } : {}) } });
-    setNotice(`Workspace selected: ${rootPath}. Waiting for engine snapshot.`);
+    // A new folder starts with its own goal; don't carry the previous project's goal over.
+    pendingRootRef.current = rootPath;
+    send({ type: "set_project", payload: { rootPath } });
+    setNotice(`Opening ${rootPath}…`);
   };
 
   const requestBreakdown = (promptText: string) => {

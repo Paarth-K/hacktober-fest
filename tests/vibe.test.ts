@@ -129,7 +129,7 @@ describe("vibe flow over the engine", () => {
   });
 
   it("vague prompt -> questions -> refined -> agent edits files -> grounded report -> user verify", async () => {
-    client.send({ type: "vibe_start", payload: { prompt: "add a feature", agent: "claude", review: true, allowCommands: false } });
+    client.send({ type: "vibe_start", payload: { prompt: "add a feature", agent: "claude", review: true, allowCommands: false, level: "beginner" } });
     let s = await until((x) => x.phase === "awaiting_answers");
     expect(s.questions[0]).toMatchObject({ id: "q1", question: "What should feature() return?" });
     expect(s.gemma).toMatchObject({ mode: "real", model: "gemma4:31b" });
@@ -186,7 +186,7 @@ describe("vibe flow over the engine", () => {
     client.send({ type: "vibe_reset", payload: {} });
     // Auto-run (review off): answering the question goes straight through refine into the agent run.
     const toolEvent = new Promise<void>((r) => client.on("vibe_agent_event", ({ event }) => event.kind === "tool" && r()));
-    client.send({ type: "vibe_start", payload: { prompt: "SLOW run please", agent: "claude", review: false, allowCommands: false } });
+    client.send({ type: "vibe_start", payload: { prompt: "SLOW run please", agent: "claude", review: false, allowCommands: false, level: "beginner" } });
     let s = await until((x) => x.phase === "awaiting_answers");
     client.send({ type: "vibe_answer", payload: { vibeId: s.id, answers: { q1: "42" } } });
     s = await until((x) => x.phase === "running", 20_000);

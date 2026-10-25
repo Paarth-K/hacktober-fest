@@ -49,12 +49,12 @@ export function VibePanel({ vibe, agents, rootPath, changeBatches, checks, verif
       <section className="panel vibe">
         {folder}
         <div className="section-title"><div><span className="eyebrow">Build</span><h2>What do you want to change?</h2></div></div>
-        <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && prompt.trim()) onSend({ type: "vibe_start", payload: { prompt: prompt.trim(), agent, review, allowCommands } }); }} placeholder="e.g. “change the theme to dark mode”. Gemma asks only if something important is unclear, then prompts the agent." />
+        <textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey) && prompt.trim()) onSend({ type: "vibe_start", payload: { prompt: prompt.trim(), agent, review, allowCommands, level: "beginner" } }); }} placeholder="e.g. “change the theme to dark mode”. Gemma asks only if something important is unclear, then prompts the agent." />
         <AgentPicker agents={agents} value={agent} onChange={setAgent} />
         <label className="toggle"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /><span>Review Gemma's prompt before the agent runs</span></label>
         <label className="toggle"><input type="checkbox" checked={allowCommands} onChange={(e) => setAllowCommands(e.target.checked)} /><span>Let the agent run shell commands (tests, installs) without asking</span></label>
         {allowCommands && <p className="notice error static small">The agent will run commands in this folder on its own. Only enable this for code you trust.</p>}
-        <button disabled={!prompt.trim() || !agents.some((a) => a.available)} onClick={() => onSend({ type: "vibe_start", payload: { prompt: prompt.trim(), agent, review, allowCommands } })}>Send to Gemma ⌘↵</button>
+        <button disabled={!prompt.trim() || !agents.some((a) => a.available)} onClick={() => onSend({ type: "vibe_start", payload: { prompt: prompt.trim(), agent, review, allowCommands, level: "beginner" } })}>Send to Gemma ⌘↵</button>
         <p className="muted small">{review ? "Gemma refines the prompt and waits for you to click Run." : `Gemma refines the prompt, then ${agents.find((a) => a.id === agent)?.name ?? agent} starts editing right away. You can stop it at any time.`}</p>
         <History items={history} busy={false} onOpen={(id) => onSend({ type: "vibe_open", payload: { vibeId: id } })} />
       </section>

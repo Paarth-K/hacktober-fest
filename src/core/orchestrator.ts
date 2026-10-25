@@ -484,6 +484,7 @@ export class Orchestrator {
       case "vibe_cancel":
       case "vibe_regenerate_report":
       case "vibe_verify":
+      case "vibe_ask":
       case "vibe_reset":
       case "vibe_open":
         await this.vibe.handle(env);

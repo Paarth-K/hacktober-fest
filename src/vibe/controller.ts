@@ -99,7 +99,7 @@ export class VibeController {
   async handle(env: VibeMessage): Promise<void> {
     switch (env.type) {
       case "vibe_start":
-        return this.start(env.payload.prompt, env.payload.agent, env.payload.review, env.payload.allowCommands);
+        return this.start(env.payload.prompt, env.payload.agent, env.payload.review, env.payload.allowCommands, env.payload.level);
       case "vibe_answer":
         return this.answer(env.payload.vibeId, env.payload.answers);
       case "vibe_skip_questions":
@@ -109,7 +109,10 @@ export class VibeController {
       case "vibe_cancel":
         return this.cancel(env.payload.vibeId);
       case "vibe_regenerate_report":
+        if (env.payload.level) this.update(env.payload.vibeId, { level: env.payload.level });
         return this.report(env.payload.vibeId);
+      case "vibe_ask":
+        return this.ask(env.payload.vibeId, env.payload.question);
       case "vibe_verify":
         return this.verify(env.payload.vibeId, env.payload.command);
       case "vibe_reset": {
@@ -132,7 +135,7 @@ export class VibeController {
 
   // ---------- phases ----------
 
-  private async start(prompt: string, agent: CodingAgentId, review: boolean, allowCommands: boolean): Promise<void> {
+  private async start(prompt: string, agent: CodingAgentId, review: boolean, allowCommands: boolean, level: VibeSession["level"]): Promise<void> {
     if (this.isBusy()) throw new Error("a coding agent run is in progress; cancel it first");
     const ws = this.requireWs();
     const at = this.iso();
@@ -145,6 +148,8 @@ export class VibeController {
       phase: "clarifying",
       review,
       allowCommands,
+      level,
+      qa: [],
       questions: [],
       clarifyRounds: 0,
       answers: {},
@@ -160,7 +165,7 @@ export class VibeController {
     this.emit(s);
 
     const summary = workspaceSummary(ws.project.rootPath);
-    const c = await this.deps.gemma().clarify(s.originalPrompt, summary);
+    const c = await this.deps.gemma().clarify(s.originalPrompt, summary, [], s.level);
     if (!this.isPhase(s.id, "clarifying")) return; // cancelled / replaced meanwhile
     if (c.vague) {
       this.update(s.id, { phase: "awaiting_answers", vague: true, vaguenessReason: c.reason, questions: c.questions, clarifyRounds: 1, gemma: c.source });
@@ -176,10 +181,11 @@ export class VibeController {
     if (!s) throw new Error(`vibe session ${vibeId} not found`);
     if (s.phase !== "awaiting_answers") throw new Error(`cannot answer in phase ${s.phase}`);
     const merged = { ...s.answers, ...answers };
-    if (s.clarifyRounds >= 2) return this.refine(vibeId, merged);
+    // Beginners get one round of plain questions; others may get one follow-up round.
+    if (s.clarifyRounds >= (s.level === "beginner" ? 1 : 2)) return this.refine(vibeId, merged);
     this.update(vibeId, { phase: "clarifying", answers: merged });
     const prior = s.questions.map((q) => ({ question: q.question, answer: merged[q.id] ?? "" })).filter((x) => x.answer.trim());
-    const c = await this.deps.gemma().clarify(s.originalPrompt, workspaceSummary(this.requireWs().project.rootPath), prior);
+    const c = await this.deps.gemma().clarify(s.originalPrompt, workspaceSummary(this.requireWs().project.rootPath), prior, s.level);
     if (!this.isPhase(vibeId, "clarifying")) return;
     if (c.vague && c.questions.length) {
       this.update(vibeId, { phase: "awaiting_answers", vaguenessReason: c.reason, questions: [...s.questions, ...c.questions], clarifyRounds: s.clarifyRounds + 1, gemma: c.source });
@@ -194,7 +200,7 @@ export class VibeController {
     if (s.phase !== from && !(from === "awaiting_answers" && s.phase === "ready")) throw new Error(`cannot refine in phase ${s.phase}`);
     this.update(vibeId, { phase: "refining", answers });
     const qa = s.questions.map((q) => ({ question: q.question, answer: answers[q.id] ?? "" }));
-    const r = await this.deps.gemma().refine(s.originalPrompt, qa, workspaceSummary(this.requireWs().project.rootPath));
+    const r = await this.deps.gemma().refine(s.originalPrompt, qa, workspaceSummary(this.requireWs().project.rootPath), s.level);
     if (!this.isPhase(vibeId, "refining")) return;
     this.update(vibeId, { phase: "ready", refinedPrompt: r.refinedPrompt, assumptions: r.assumptions, gemma: r.source });
     this.ensureTask(vibeId, r.title, r.acceptanceCriteria);
@@ -287,7 +293,9 @@ export class VibeController {
     try {
       const context = await this.deps.observer.getContext(s.changeBatchIds, { maxChars: 40_000 });
       const agentName = AGENTS[s.run.agent].name;
+      const cur = this.find(vibeId)!;
       const input = {
+        level: cur.level,
         originalPrompt: s.originalPrompt,
         refinedPrompt: s.refinedPrompt ?? s.originalPrompt,
         agentName,
@@ -304,6 +312,25 @@ export class VibeController {
     } catch (e) {
       this.update(vibeId, { phase: "failed", error: `report failed: ${e instanceof Error ? e.message : String(e)}` });
     }
+  }
+
+  /** Learn pane follow-up: Gemma answers from this change's diffs at the session level. */
+  private async ask(vibeId: string, question: string): Promise<void> {
+    const s = this.find(vibeId);
+    if (!s?.run) throw new Error("ask after the agent has run");
+    const at = this.iso();
+    const previous = s.qa.filter((x) => !x.pending).map(({ question: q, answer: a }) => ({ question: q, answer: a }));
+    this.update(vibeId, { qa: [...s.qa, { question, answer: "", at, pending: true }] });
+    let answer: string;
+    try {
+      const context = await this.deps.observer.retrieveForQuestion(question, s.changeBatchIds, { maxChars: 30_000 });
+      answer = (await this.deps.gemma().answer(question, s.level, { originalPrompt: s.originalPrompt, reportSummary: s.report?.summary, context, previous })).answer;
+    } catch (e) {
+      answer = `Couldn't answer that: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    const cur = this.find(vibeId);
+    if (!cur) return;
+    this.update(vibeId, { qa: cur.qa.map((x) => (x.at === at && x.question === question ? { ...x, answer, pending: false } : x)) });
   }
 
   private async verify(vibeId: string, command: string): Promise<void> {
