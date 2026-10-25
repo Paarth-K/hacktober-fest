@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Local Code Companion",
+  "version": "0.1.0",
+  "identifier": "dev.localcode.companion",
+  "build": {
+    "beforeDevCommand": "npm --prefix src/ui run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm --prefix src/ui run build",
+    "frontendDist": "../src/ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Local Code Companion",
+        "width": 380,
+        "height": 640,
+        "minWidth": 320,
+        "minHeight": 88,
+        "resizable": true,
+        "alwaysOnTop": true,
+        "decorations": true,
+        "center": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' ws://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "targets": "all"
+  }
+}
