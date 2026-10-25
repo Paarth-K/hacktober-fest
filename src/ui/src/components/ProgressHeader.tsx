@@ -1,4 +1,4 @@
-import type { ProgressSnapshot, Project, Task } from "../lib/contracts";
+import type { ProgressSnapshot, Project, Task } from "../../../shared/index.js";
 
 const statusMeta = {
   verified_complete: { label: "Verified", color: "var(--verified)" },
@@ -8,7 +8,7 @@ const statusMeta = {
   not_started: { label: "Not started", color: "var(--idle)" }
 } as const;
 
-function relativeTime(value: string | null) {
+function relativeTime(value: string | null | undefined) {
   if (!value) return "No activity yet";
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
   if (seconds < 60) return "Just now";
