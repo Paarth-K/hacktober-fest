@@ -88,13 +88,13 @@ Machine B: macOS arm64, Node 24.21, rustc 1.99, Ollama `gemma4:31b`, `integratio
 | `npm run gate`: real uncommitted create/modify/delete → real hunks, `.env` excluded, suggested link not auto-applied, 0% after activity, failing check does not complete, passing check → verified (50%), report saved, relaunch persists | 19/19 PASS |
 | `npm run gate:live` with `gemma4:31b`: same + live explanation (17.6 s, 2 quiz questions, valid citations) + live follow-up (9.3 s) | 19/19 PASS |
 | Independent live Gemma on a second machine (P3 on A, P4 on B) | PASS on both |
-| P2 observer + context tests on Windows 11 | PASS (P2) |
-| Full app on Windows / Linux | **NOT TESTED** |
+| Windows 11 (P2, Node 24.19): `npm run check`, `npm run gate` with mock AI (real observer, real edits, real checks) | PASS (P2) |
+| Tauri window / UI on Windows; anything on Linux; live Gemma on Windows | **NOT TESTED** |
 
 ## Known limitations
 
 - The engine runs as a separate Node process started by `npm run dev`. It is not yet bundled as a Tauri sidecar, so there is no single-binary install.
-- Only macOS has had a full app run. Windows has only had observer tests, and Linux is untested.
+- Only macOS has had a full app run. On Windows, the engine, observer and e2e gate pass but the Tauri window is untested. Linux is untested.
 - Checks run through the system shell with the exact text you configured. Only configure commands you trust.
 - Change→task attribution is heuristic (paths, keywords, previously linked files). It is always a suggestion.
 - Explanations are grounded in bounded excerpts and can still be wrong. They are never verification.
