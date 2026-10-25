@@ -282,6 +282,38 @@ describe("live observer", () => {
     expect((await pending).changes[0]).toMatchObject({ path: "src/auth/login.ts", kind: "create" });
   });
 
+  it("reports every file of a removed directory and of a freshly written one", async () => {
+    await mkdir(path.join(root, "src", "feature"), { recursive: true });
+    await write("src/feature/a.ts", "export const a = 1;\n");
+    await write("src/feature/b.ts", "export const b = 2;\n");
+    await nextBatch();
+
+    const removed = nextBatch();
+    await rm(path.join(root, "src", "feature"), { recursive: true, force: true });
+    expect((await removed).changes.map((c) => [c.path, c.kind])).toEqual([
+      ["src/feature/a.ts", "delete"],
+      ["src/feature/b.ts", "delete"],
+    ]);
+
+    const added = nextBatch();
+    await mkdir(path.join(root, "src", "fresh", "deep"), { recursive: true });
+    await write("src/fresh/deep/x.ts", "export const x = 1;\n");
+    await write("src/fresh/y.ts", "export const y = 2;\n");
+    expect((await added).changes.map((c) => [c.path, c.kind])).toEqual([
+      ["src/fresh/deep/x.ts", "create"],
+      ["src/fresh/y.ts", "create"],
+    ]);
+  });
+
+  it("treats a rename as delete + create", async () => {
+    const pending = nextBatch();
+    await (await import("node:fs/promises")).rename(path.join(root, "src", "old.ts"), path.join(root, "src", "renamed.ts"));
+    expect((await pending).changes.map((c) => [c.path, c.kind])).toEqual([
+      ["src/old.ts", "delete"],
+      ["src/renamed.ts", "create"],
+    ]);
+  });
+
   it("uses linked change batches as an attribution signal", async () => {
     const pending = nextBatch();
     await write("src/server.ts", "export const port = 1;\n\nexport function start() {\n  return port;\n}\n");

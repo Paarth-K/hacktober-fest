@@ -215,6 +215,25 @@ export class LocalObserver implements Observer {
     };
   }
 
+  /**
+   * Makes batches from an earlier engine run (persisted state) known again, without
+   * emitting them. Their stored diffs and evidence are used as-is; no excerpts are read
+   * for them, because the files may have changed since those line numbers were recorded.
+   */
+  restoreBatches(batches: readonly ChangeBatch[]): number {
+    const none: ContentSource = { read: async () => null, paths: () => [] };
+    let restored = 0;
+    for (const b of batches) {
+      if (this.batches.has(b.id)) continue;
+      const parsed = ChangeBatchSchema.safeParse(b);
+      if (!parsed.success) continue;
+      this.batches.set(b.id, { batch: parsed.data, source: none });
+      restored++;
+    }
+    while (this.batches.size > MAX_RECENT_BATCHES) this.batches.delete(this.batches.keys().next().value!);
+    return restored;
+  }
+
   getBatch(id: string): ChangeBatch | undefined {
     return this.batches.get(id)?.batch;
   }

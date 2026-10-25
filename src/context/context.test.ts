@@ -102,6 +102,21 @@ describe("context packets", () => {
     expect(ctx.excerpts.some((x) => x.text.includes("refreshTokenRotation"))).toBe(false);
   });
 
+  it("restoreBatches makes persisted batches usable for context without re-emitting them", async () => {
+    const batch = (await createObserver({ watch: false }).replayFiles(MULTI_FILE_FIXTURE))!;
+    const fresh = createObserver({ watch: false });
+    let emitted = 0;
+    fresh.onBatch(() => emitted++);
+    expect(fresh.restoreBatches([batch, batch])).toBe(1);
+    expect(emitted).toBe(0);
+    const ctx = await fresh.getContext([batch.id]);
+    expect(ctx.missing).toEqual([]);
+    expect(ctx.diffs).toHaveLength(4);
+    expect(ctx.evidence.length).toBe(batch.evidence.length);
+    expect(ctx.excerpts).toEqual([]);
+    expect(ctx.omissions.some((o) => o.reason === "unreadable")).toBe(true);
+  });
+
   it("reports unknown change batch ids", async () => {
     const ctx = await createObserver({ watch: false }).getContext(["cb_nope"]);
     expect(ctx.missing[0]).toContain("cb_nope");
