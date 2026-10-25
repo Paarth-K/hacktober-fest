@@ -43,8 +43,15 @@ export const TaskBreakdownBodySchema = z.object({ tasks: z.array(z.object({
 })).min(3).max(10) });
 export const TaskBreakdownSuggestionSchema = TaskBreakdownBodySchema.extend({ provider: z.string(), mode: z.enum(['mock', 'live']) });
 export type TaskBreakdownSuggestion = z.infer<typeof TaskBreakdownSuggestionSchema>;
+export interface ProviderStatus {
+  provider: string;
+  state: 'real' | 'mock' | 'offline';
+  model?: string;
+  detail?: string;
+}
 export interface ModelProvider {
   readonly name: string;
+  status(): Promise<ProviderStatus>;
   explain(request: ExplanationRequest): Promise<ExplanationResponse>;
   breakdown(request: TaskBreakdownRequest): Promise<TaskBreakdownSuggestion>;
 }

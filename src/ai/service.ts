@@ -17,6 +17,7 @@ export class LearningService implements ModelProvider {
       return { value: await action(this.fallback), failure };
     }
   }
+  status() { return this.primary.status(); }
   async explain(request: ExplanationRequest): Promise<ExplanationResponse> {
     const result = await this.run(provider => provider.explain(request));
     return result.failure ? { ...result.value, uncertainties: [...result.value.uncertainties, `Live model ${result.failure.code}: ${result.failure.message}. Explicit mock fallback.`].slice(-20) } : result.value;

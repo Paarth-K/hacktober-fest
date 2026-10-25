@@ -3,6 +3,7 @@ import { boundContext } from './context.js';
 
 export class MockProvider implements ModelProvider {
   readonly name = 'deterministic-mock';
+  async status() { return { provider: this.name, state: 'mock' as const, detail: 'Deterministic mock; no inference performed.' }; }
   async explain(input: ExplanationRequest): Promise<ExplanationResponse> {
     const request = ExplanationRequestSchema.parse(input);
     const context = boundContext(request.context);

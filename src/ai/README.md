@@ -9,6 +9,7 @@ npm ci --prefix src/ai
 npm run --prefix src/ai typecheck
 npm test --prefix src/ai
 ollama list
+OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:status
 OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:live
 OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:observed
 ```
@@ -44,3 +45,12 @@ Source excerpts are limited to 24,000 UTF-8 bytes (including ref metadata); over
 JSON shape, citation IDs, paths, batches and line bounds are checked. Explicit slash-separated file references in prose are also checked. Invalid output is discarded, and the service can return an explicit mock. Prompts treat repository contents as untrusted data. These checks cannot prove semantic claims or prevent every prompt injection. Model content must remain explanation only and never affect verification or progress status. Conservative completion/test-success wording is rejected even when a supplied verification run might support it; P4's deterministic report is the authority for check results.
 
 The live smoke uses sample source excerpts, not the not-yet-integrated P2 watcher. A separate observed-edit regression creates and edits three files in an isolated temporary workspace, reads their real before/after contents, and submits bounded evidence. This tests inference from actual disk edits but does not validate P2 watcher integration. Live result artifacts record precise commands/output separately. No independent second-machine test is performed by P3.
+
+
+## P4 announcement alignment
+
+Merged the published M0 foundation without rewriting the pushed feature branch. P4 owns the canonical adapter in `src/integrations/aiAdapter.ts`; P3 boundary schemas remain as agreed in `M1-P4-to-P3-ALIGN-01`. Until P4 switches the engine import, `createModelProvider` re-exports the unchanged, explicitly mocked M0 factory from `foundation-placeholder.ts`. This compatibility entry is not the live P3 service. Use the provider classes above for live inference.
+
+`OllamaProvider.status()` performs only `GET /api/tags`, bounds the response and times out after at most five seconds. It never throws and returns `{provider, state: 'real'|'offline', model, detail}`. A reachable server without the configured model returns offline with a distinct detail. `state: 'real'` confirms reachability and installed tag; it does not mean inference ran. `MockProvider.status()` returns mock. `LearningService.status()` delegates to the primary provider so outages remain visible.
+
+P3's Node test file uses `.node.ts` so root Vitest does not accidentally collect a Node test-runner suite. Run both the root `npm run check` and standalone AI test command.

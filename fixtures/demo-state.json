@@ -1,0 +1,142 @@
+{
+  "project": {
+    "id": "proj_demo",
+    "name": "todo-api",
+    "rootPath": "/tmp/lcc-demo-workspace",
+    "goal": "Build a small Express todo API with login, CRUD endpoints and tests.",
+    "checkCommands": [
+      { "id": "chk_test", "label": "Unit tests", "command": "npm test", "timeoutMs": 120000 },
+      { "id": "chk_auth", "label": "Auth tests", "command": "npm test -- auth", "timeoutMs": 60000 }
+    ],
+    "createdAt": "2026-10-25T21:00:00.000Z",
+    "updatedAt": "2026-10-25T21:30:00.000Z"
+  },
+  "milestones": [],
+  "tasks": [
+    {
+      "id": "task_scaffold", "projectId": "proj_demo", "title": "Scaffold Express server", "order": 0,
+      "status": "verified_complete",
+      "acceptanceCriteria": [
+        { "id": "ac_s1", "text": "GET /health returns 200", "met": true, "metBy": "check", "checkCommandId": "chk_test" }
+      ],
+      "linkedChangeBatchIds": [], "evidenceIds": [], "verificationRunIds": ["run_pass_1"],
+      "statusHistory": [
+        { "at": "2026-10-25T21:05:00.000Z", "from": "not_started", "to": "activity_detected", "reason": "Linked change batch", "actor": "user" },
+        { "at": "2026-10-25T21:10:00.000Z", "from": "activity_detected", "to": "verified_complete", "reason": "Check \"Unit tests\" (npm test) passed (exit 0)", "actor": "check", "verificationRunId": "run_pass_1" }
+      ],
+      "createdAt": "2026-10-25T21:00:00.000Z", "updatedAt": "2026-10-25T21:10:00.000Z", "lastActivityAt": "2026-10-25T21:05:00.000Z"
+    },
+    {
+      "id": "task_readme", "projectId": "proj_demo", "title": "Write README", "order": 1,
+      "status": "user_confirmed",
+      "acceptanceCriteria": [ { "id": "ac_r1", "text": "README explains how to run", "met": true, "metBy": "user" } ],
+      "linkedChangeBatchIds": [], "evidenceIds": [], "verificationRunIds": [],
+      "statusHistory": [ { "at": "2026-10-25T21:12:00.000Z", "from": "not_started", "to": "user_confirmed", "reason": "Ticked criterion \"README explains how to run\"", "actor": "user" } ],
+      "createdAt": "2026-10-25T21:00:00.000Z", "updatedAt": "2026-10-25T21:12:00.000Z"
+    },
+    {
+      "id": "task_login", "projectId": "proj_demo", "title": "Add login endpoint", "order": 2,
+      "status": "activity_detected",
+      "acceptanceCriteria": [
+        { "id": "ac_l1", "text": "POST /login returns a token for valid credentials", "met": false, "metBy": "none", "checkCommandId": "chk_auth" },
+        { "id": "ac_l2", "text": "Invalid password returns 401", "met": false, "metBy": "none", "checkCommandId": "chk_auth" }
+      ],
+      "linkedChangeBatchIds": ["cb_demo_1"], "evidenceIds": ["ev_1", "ev_2"], "verificationRunIds": [],
+      "statusHistory": [ { "at": "2026-10-25T21:28:00.000Z", "from": "not_started", "to": "activity_detected", "reason": "Linked change batch cb_demo_1", "actor": "user" } ],
+      "createdAt": "2026-10-25T21:00:00.000Z", "updatedAt": "2026-10-25T21:28:00.000Z", "lastActivityAt": "2026-10-25T21:28:00.000Z"
+    },
+    {
+      "id": "task_crud", "projectId": "proj_demo", "title": "Todo CRUD endpoints", "order": 3,
+      "status": "needs_verification",
+      "acceptanceCriteria": [
+        { "id": "ac_c1", "text": "POST/GET/DELETE /todos work", "met": false, "metBy": "none", "checkCommandId": "chk_test" }
+      ],
+      "linkedChangeBatchIds": [], "evidenceIds": [], "verificationRunIds": ["run_fail_1"],
+      "regressedAt": "2026-10-25T21:25:00.000Z",
+      "statusHistory": [
+        { "at": "2026-10-25T21:15:00.000Z", "from": "not_started", "to": "activity_detected", "reason": "Linked change batch", "actor": "user" },
+        { "at": "2026-10-25T21:25:00.000Z", "from": "activity_detected", "to": "needs_verification", "reason": "Regression: check \"Unit tests\" (npm test) previously passed, now failed (exit 1)", "actor": "check", "verificationRunId": "run_fail_1" }
+      ],
+      "createdAt": "2026-10-25T21:00:00.000Z", "updatedAt": "2026-10-25T21:25:00.000Z", "lastActivityAt": "2026-10-25T21:15:00.000Z"
+    },
+    {
+      "id": "task_deploy", "projectId": "proj_demo", "title": "Dockerfile for deployment", "order": 4,
+      "status": "not_started",
+      "acceptanceCriteria": [ { "id": "ac_d1", "text": "docker build succeeds", "met": false, "metBy": "none" } ],
+      "linkedChangeBatchIds": [], "evidenceIds": [], "verificationRunIds": [], "statusHistory": [],
+      "createdAt": "2026-10-25T21:00:00.000Z", "updatedAt": "2026-10-25T21:00:00.000Z"
+    }
+  ],
+  "changeBatches": [
+    {
+      "id": "cb_demo_1", "sessionId": "sess_demo", "timestamp": "2026-10-25T21:28:00.000Z", "source": "fixture",
+      "changes": [
+        {
+          "path": "src/auth/login.ts", "kind": "create", "baselineMissing": false, "truncated": false,
+          "after": "import { Router } from \"express\";\nimport { verifyPassword, signToken } from \"./tokens\";\n\nexport const login = Router();\n\nlogin.post(\"/login\", async (req, res) => {\n  const { user, password } = req.body;\n  if (!(await verifyPassword(user, password))) return res.status(401).json({ error: \"invalid\" });\n  res.json({ token: signToken(user) });\n});\n",
+          "hunks": [ { "oldStart": 0, "oldLines": 0, "newStart": 1, "newLines": 10, "lines": [
+            "+import { Router } from \"express\";", "+import { verifyPassword, signToken } from \"./tokens\";", "+", "+export const login = Router();", "+",
+            "+login.post(\"/login\", async (req, res) => {", "+  const { user, password } = req.body;",
+            "+  if (!(await verifyPassword(user, password))) return res.status(401).json({ error: \"invalid\" });", "+  res.json({ token: signToken(user) });", "+});" ] } ]
+        },
+        {
+          "path": "src/server.ts", "kind": "modify", "baselineMissing": false, "truncated": false,
+          "hunks": [ { "oldStart": 3, "oldLines": 2, "newStart": 3, "newLines": 4, "lines": [
+            " const app = express();", "+import { login } from \"./auth/login\";", "+app.use(express.json());", " app.get(\"/health\", (_req, res) => res.sendStatus(200));" ] } ]
+        },
+        {
+          "path": "src/legacy/session.ts", "kind": "delete", "baselineMissing": false, "truncated": false,
+          "hunks": [ { "oldStart": 1, "oldLines": 2, "newStart": 0, "newLines": 0, "lines": [ "-// old cookie session helper", "-export const session = {};" ] } ]
+        }
+      ],
+      "omissions": [ { "path": ".env", "reason": "secret", "detail": "matches secret pattern" } ],
+      "evidence": [
+        { "id": "ev_1", "path": "src/auth/login.ts", "startLine": 1, "endLine": 10, "changeBatchId": "cb_demo_1" },
+        { "id": "ev_2", "path": "src/server.ts", "startLine": 3, "endLine": 6, "changeBatchId": "cb_demo_1" }
+      ],
+      "suggestedTaskLinks": [ { "taskId": "task_login", "score": 0.82, "reason": "path src/auth/login.ts matches task \"Add login endpoint\"" } ],
+      "linkedTaskId": "task_login"
+    },
+    {
+      "id": "cb_demo_2", "sessionId": "sess_demo", "timestamp": "2026-10-25T21:29:30.000Z", "source": "fixture",
+      "changes": [
+        { "path": "src/auth/tokens.ts", "kind": "create", "baselineMissing": false, "truncated": false,
+          "after": "export async function verifyPassword(u: string, p: string) { return p === \"secret\"; }\nexport function signToken(u: string) { return `tok_${u}`; }\n",
+          "hunks": [ { "oldStart": 0, "oldLines": 0, "newStart": 1, "newLines": 2, "lines": [
+            "+export async function verifyPassword(u: string, p: string) { return p === \"secret\"; }", "+export function signToken(u: string) { return `tok_${u}`; }" ] } ] }
+      ],
+      "omissions": [],
+      "evidence": [ { "id": "ev_3", "path": "src/auth/tokens.ts", "startLine": 1, "endLine": 2, "changeBatchId": "cb_demo_2" } ],
+      "suggestedTaskLinks": [ { "taskId": "task_login", "score": 0.64, "reason": "same directory as linked file src/auth/login.ts" } ]
+    }
+  ],
+  "verificationRuns": [
+    { "id": "run_pass_1", "projectId": "proj_demo", "taskIds": ["task_scaffold"], "checkCommandId": "chk_test", "command": "npm test",
+      "startedAt": "2026-10-25T21:09:55.000Z", "finishedAt": "2026-10-25T21:10:00.000Z", "exitCode": 0, "durationMs": 5000,
+      "outputTail": "PASS test/health.test.ts\nTests: 1 passed", "result": "pass" },
+    { "id": "run_fail_1", "projectId": "proj_demo", "taskIds": ["task_crud"], "checkCommandId": "chk_test", "command": "npm test",
+      "startedAt": "2026-10-25T21:24:50.000Z", "finishedAt": "2026-10-25T21:25:00.000Z", "exitCode": 1, "durationMs": 10000,
+      "outputTail": "FAIL test/todos.test.ts\n  expected 200, received 404", "result": "fail" }
+  ],
+  "explanation": {
+    "requestId": "req_demo_1",
+    "summary": "[MOCK] Adds a POST /login route that checks a password and returns a token, wires JSON body parsing into the server, and deletes an old session helper.",
+    "behaviorChanges": ["New POST /login endpoint", "Server now parses JSON bodies", "Legacy session helper removed"],
+    "concepts": [ { "name": "Express Router", "explanation": "A Router groups related routes so they can be mounted on the app.", "example": "const r = Router(); r.post('/login', handler); app.use(r);" } ],
+    "concerns": ["login router is imported but app.use(login) is not visible in the diff"],
+    "evidence": [ { "path": "src/auth/login.ts", "startLine": 6, "endLine": 10, "evidenceId": "ev_1" }, { "path": "src/server.ts", "startLine": 3, "endLine": 6, "evidenceId": "ev_2" } ],
+    "invalidCitations": [],
+    "uncertainties": ["verifyPassword implementation was not in the provided context"],
+    "quiz": [ { "question": "What status code does /login return for a wrong password?", "choices": ["200", "401", "404"], "answerIndex": 1, "answer": "401", "explanation": "See src/auth/login.ts line 8." } ],
+    "provider": "mock", "mode": "mock"
+  },
+  "breakdown": {
+    "requestId": "req_demo_bd",
+    "tasks": [
+      { "title": "Scaffold Express server", "acceptanceCriteria": ["GET /health returns 200"] },
+      { "title": "Add login endpoint", "acceptanceCriteria": ["POST /login returns a token for valid credentials", "Invalid password returns 401"] },
+      { "title": "Todo CRUD endpoints", "acceptanceCriteria": ["POST/GET/DELETE /todos work"] }
+    ],
+    "provider": "mock", "mode": "mock"
+  }
+}

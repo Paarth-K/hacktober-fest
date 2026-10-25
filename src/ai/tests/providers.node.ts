@@ -93,3 +93,25 @@ test('HTTP failures, oversized bodies and non-JSON envelopes reject cleanly', as
     await assert.rejects(local.explain(request), { code });
   }
 });
+
+test('status uses local GET /api/tags and confirms configured tag without inference', async () => {
+  let calls = 0;
+  const local = new OllamaProvider({ model: 'gemma-test:1', fetch: async (url, init) => {
+    calls++; assert.match(String(url), /\/api\/tags$/); assert.equal(init?.method, 'GET'); assert.equal(init?.redirect, 'error');
+    return new Response(JSON.stringify({ models: [{ name: 'gemma-test:1' }] }));
+  } });
+  assert.equal((await local.status()).state, 'real'); assert.equal(calls, 1);
+  assert.equal((await new MockProvider().status()).state, 'mock');
+  assert.equal((await new LearningService(local).status()).state, 'real');
+});
+test('status never throws for offline, missing model, invalid/oversized responses or timeout', async () => {
+  const fetchers: (typeof fetch)[] = [
+    async () => { throw new Error('offline'); },
+    async () => new Response('', { status: 503 }),
+    async () => new Response(JSON.stringify({ models: [{ name: 'other' }] })),
+    async () => new Response('bad JSON'),
+    async () => new Response('x'.repeat(200001)),
+    async (_url, init) => new Promise((_resolve, reject) => init!.signal!.addEventListener('abort', () => reject(new Error('abort')))),
+  ];
+  for (const fetcher of fetchers) assert.equal((await new OllamaProvider({ model: 'test', timeoutMs: 5, fetch: fetcher }).status()).state, 'offline');
+});

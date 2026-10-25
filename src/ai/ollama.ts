@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ExplanationRequestSchema, ExplanationBodySchema, ExplanationResponseSchema, TaskBreakdownRequestSchema, TaskBreakdownBodySchema, TaskBreakdownSuggestionSchema, type ExplanationRequest, type ExplanationResponse, type ModelProvider, type TaskBreakdownRequest, type TaskBreakdownSuggestion } from './contracts.js';
+import { ExplanationRequestSchema, ExplanationBodySchema, ExplanationResponseSchema, TaskBreakdownRequestSchema, TaskBreakdownBodySchema, TaskBreakdownSuggestionSchema, type ProviderStatus, type ExplanationRequest, type ExplanationResponse, type ModelProvider, type TaskBreakdownRequest, type TaskBreakdownSuggestion } from './contracts.js';
 import { assertNoSecrets, boundContext, validateCitations, validateProseReferences } from './context.js';
 import { EXPLANATION_SYSTEM, BREAKDOWN_SYSTEM } from '../skills/prompts.js';
 
@@ -29,6 +29,29 @@ export class OllamaProvider implements ModelProvider {
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) throw new ModelError('configuration', 'Invalid model timeout');
     this.fetcher = options.fetch ?? fetch;
     this.name = `ollama:${this.model}`;
+  }
+  /** Cheap probe only; does not run inference and never throws. */
+  async status(): Promise<ProviderStatus> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.min(this.timeoutMs, 5000));
+    try {
+      const response = await this.fetcher(`${this.baseUrl}/api/tags`, { method: 'GET', redirect: 'error', signal: controller.signal });
+      if (!response.ok) return { provider: this.name, model: this.model, state: 'offline', detail: `Ollama returned HTTP ${response.status}` };
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('Missing body');
+      const chunks: Uint8Array[] = []; let bytes = 0;
+      while (true) {
+        const chunk = await reader.read(); if (chunk.done) break;
+        bytes += chunk.value.byteLength;
+        if (bytes > 200000) { await reader.cancel(); throw new Error('Tags exceeded budget'); }
+        chunks.push(chunk.value);
+      }
+      const tags = z.object({ models: z.array(z.object({ name: z.string(), model: z.string().optional() })).max(1000) }).parse(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+      const installed = tags.models.some(tag => tag.name === this.model || tag.model === this.model || tag.name === `${this.model}:latest`);
+      return { provider: this.name, model: this.model, state: installed ? 'real' : 'offline', detail: installed ? 'Local Ollama reachable; configured model installed. Inference not tested by this probe.' : 'Local Ollama reachable; configured model is not installed.' };
+    } catch {
+      return { provider: this.name, model: this.model, state: 'offline', detail: controller.signal.aborted ? 'Ollama status probe timed out.' : 'Ollama status unavailable or invalid.' };
+    } finally { clearTimeout(timer); }
   }
   private async generate(system: string, input: unknown, schema: z.ZodTypeAny): Promise<unknown> {
     const controller = new AbortController();
