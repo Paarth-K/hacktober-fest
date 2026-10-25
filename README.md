@@ -81,9 +81,10 @@ Machine B: macOS arm64, Node 24.21, rustc 1.99, Ollama `gemma4:31b`, `integratio
 
 | Check | Result |
 |---|---|
-| `npm run check`: strict typecheck, 60 Vitest (schemas, progress rules, real check processes, engine-over-WS e2e, adapter, observer, context), 16 AI provider tests | PASS |
+| `npm run check`: strict typecheck, 65 Vitest (schemas, progress rules, real check processes, engine-over-WS e2e, adapter, observer, context), 16 AI provider tests | PASS |
 | `npx vite build`, `cargo test` (open-file path safety) | PASS |
-| `npm run dev:mock`: Tauri window launches, UI connects to the engine | PASS (process + WS verified; visual check by P1) |
+| `npm run dev:mock` / `npm run dev`: Tauri window launches, UI connects to the engine | PASS |
+| Visual check of the UI (P1 + P4, live UI against the running engine): all status segments, 40%, compact strip, criteria readable, MOCK labels, Verify running/pass/fail with 40%→20% regression and 0%→100% on a real workspace, model-offline banner, relaunch | PASS (pixels of the native Tauri frame and always-on-top were not screen-captured) |
 | `npm run gate`: real uncommitted create/modify/delete → real hunks, `.env` excluded, suggested link not auto-applied, 0% after activity, failing check does not complete, passing check → verified (50%), report saved, relaunch persists | 19/19 PASS |
 | `npm run gate:live` with `gemma4:31b`: same + live explanation (17.6 s, 2 quiz questions, valid citations) + live follow-up (9.3 s) | 19/19 PASS |
 | Independent live Gemma on a second machine (P3 on A, P4 on B) | PASS on both |
