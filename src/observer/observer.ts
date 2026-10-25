@@ -3,7 +3,7 @@
  * file events, reconciles each touched path against a content baseline, and emits
  * ChangeBatch activity evidence. It never decides task status and never talks to the UI.
  */
-import type { Stats } from "node:fs";
+import { lstatSync, type Stats } from "node:fs";
 import { readdir, readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { watch, type FSWatcher } from "chokidar";
@@ -370,9 +370,13 @@ export class LocalObserver implements Observer {
     const rel = toWorkspaceRel(root, abs);
     if (rel === null) return true;
     const base = rel.slice(rel.lastIndexOf("/") + 1);
-    if (!stats || stats.isDirectory()) {
-      if (isIgnoredDirName(base) || this.extraDirs.has(base.toLowerCase())) return true;
-      if (stats?.isDirectory()) return classifyPath(`${rel}/x`, this.extraDirs) !== null;
+    if (isIgnoredDirName(base) || this.extraDirs.has(base.toLowerCase())) {
+      // chokidar sometimes asks without stats. Only a directory named build/dist/… is
+      // ignored; a file such as scripts/build is ordinary source.
+      const st = stats ?? lstatSync(abs, { throwIfNoEntry: false });
+      if (!st || st.isDirectory()) return true;
+    } else if (stats?.isDirectory()) {
+      return classifyPath(`${rel}/x`, this.extraDirs) !== null;
     }
     const reason = classifyPath(rel, this.extraDirs);
     // Secret files stay visible to the watcher so their change is reported as an

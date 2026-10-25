@@ -260,6 +260,16 @@ describe("live observer", () => {
     expect(JSON.stringify(ctx)).not.toContain("sk-live");
   });
 
+  it("watches extensionless files named like ignored dirs (scripts/build, bin/out)", async () => {
+    await mkdir(path.join(root, "scripts"), { recursive: true });
+    const created = nextBatch();
+    await write("scripts/build", "#!/bin/sh\nnpm run ui:build\n");
+    expect((await created).changes.map((c) => [c.path, c.kind])).toEqual([["scripts/build", "create"]]);
+    const edited = nextBatch();
+    await write("scripts/build", "#!/bin/sh\nnpm run ui:build\nnpm test\n");
+    expect((await edited).changes[0]!.hunks.flatMap((h) => h.lines)).toContain("+npm test");
+  });
+
   it("emits nothing when a save does not change content", async () => {
     await write("README.md", "# demo\n");
     await new Promise((r) => setTimeout(r, DEBOUNCE * 4));
