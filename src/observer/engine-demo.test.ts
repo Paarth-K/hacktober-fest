@@ -38,7 +38,8 @@ beforeAll(async () => {
   writeFileSync(file("README.md"), "# demo\n");
   writeFileSync(file(".env"), "API_KEY=sk-live-demo-secret\n");
 
-  engine = await startEngine({ dataDir, quiet: true });
+  // Pinned to mock: a unit test must not depend on whether Ollama happens to be installed.
+  engine = await startEngine({ dataDir, quiet: true, modelProvider: "mock" });
   client = new EngineClient({ port: engine.bridge.port, token: engine.bridge.token }, { WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket });
   const first = next("state_snapshot");
   client.connect();
@@ -108,6 +109,6 @@ describe("M4 demo: 3-file uncommitted edit through the engine", () => {
     const explanation = await res;
     const changedPaths = new Set(batch.changes.map((c) => c.path).concat(["src/auth/login.ts"]));
     for (const c of explanation.evidence) expect(changedPaths.has(c.path)).toBe(true);
-    expect(["real", "mock"]).toContain(explanation.mode);
+    expect(explanation.mode).toBe("mock");
   }, 60_000);
 });
