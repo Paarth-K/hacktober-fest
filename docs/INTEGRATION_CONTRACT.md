@@ -17,7 +17,7 @@ The source of truth is the code in `src/shared/`. This doc tells you what to imp
 | `src/engine/main.ts` | P4 | Engine entry point: wires observer + provider + orchestrator + bridge |
 | `src/observer/`, `src/context/` | **P2** | Must export `createObserver(): Observer` from `src/observer/index.ts` |
 | `src/ai/`, `src/skills/` | **P3** | Must export `createModelProvider(opts: ModelProviderOptions): ModelProvider` from `src/ai/index.ts` |
-| `src/ui/` | **P1** | React UI. The M0 `App.tsx` is a placeholder you can replace |
+| `src/ui/` | **P1** | React UI (`src/ui/src/*`) |
 | `src-tauri/src/window.rs`, window config | **P1** | Window commands. `src-tauri/src/engine.rs` (`engine_connection`) is P4's |
 
 The files in P2/P3/P1 areas are **placeholders**. Overwrite them, but keep the export names above so `src/engine/main.ts` keeps compiling.
@@ -68,6 +68,7 @@ Main flows:
 - Set `suggestedTaskLinks` with a score and reason, or `[]` when confidence is low. The engine drops links to unknown task ids and never applies them automatically.
 - **Ignore** `.git, node_modules, dist, build, target, .local-code-companion/` (the engine writes reports there), secrets, binaries and large files.
 - `getContext` / `retrieveForQuestion` return a bounded `ContextPacket`. Put symbols you could not find in `missing`.
+- Optional `restoreBatches(batches)`: the engine calls it once after `start()` with the batches persisted for this workspace, so context still works after a relaunch. It must not call `onBatch`.
 
 ## Provider contract (P3)
 

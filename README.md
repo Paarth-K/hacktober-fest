@@ -1,52 +1,101 @@
 # Local Code Companion
 
-A local-first floating desktop window (Tauri 2) that sits on top of your editor, **tracks how far your project has actually progressed**, and explains local edits made by Claude Code, Codex, or any other tool, using a local Gemma model through Ollama.
+A local-first floating desktop window (Tauri 2) that sits on top of your editor or terminal and **tracks how far your project has actually progressed**. It watches the edits Claude Code, Codex, you, or any other tool make in your local workspace, attaches them to tasks as evidence, and explains them with a local Gemma model through Ollama.
 
-> Status: **M0 foundation.** The scaffold, shared contract, engine core (progress engine, verification runner, JSON persistence, loopback WebSocket) and a placeholder UI are in. The observer (P2), AI (P3) and full UI (P1) are in progress on their feature branches. The "Tested" section below lists what has actually been run.
+Percent complete only moves when a check command **you** ran passes, or when you explicitly confirm a task. File activity and AI explanations never count as completion.
 
 ## Prerequisites
 
-- Node.js LTS (tested with v24) + npm
-- Rust stable (`rustup`), plus the Tauri 2 platform prerequisites:
-  - **macOS:** Xcode Command Line Tools (`xcode-select --install`)
-  - **Windows:** Microsoft C++ Build Tools (MSVC) + WebView2 runtime
-  - **Linux (Debian/Ubuntu):** `sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev`
-- Optional: [Ollama](https://ollama.com) with a Gemma model. Run `ollama list` to see which tags you have installed, then `export OLLAMA_MODEL=<tag>`.
+| | macOS | Windows | Linux (Debian/Ubuntu) |
+|---|---|---|---|
+| Node.js LTS + npm | ✓ (tested v24) | ✓ | ✓ |
+| Rust stable | `curl https://sh.rustup.rs -sSf \| sh` | rustup-init.exe | `curl https://sh.rustup.rs -sSf \| sh` |
+| Tauri 2 system deps | Xcode Command Line Tools: `xcode-select --install` | Microsoft C++ Build Tools (MSVC) + WebView2 runtime | `sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev` |
+
+Optional, for real explanations: [Ollama](https://ollama.com) running locally with a Gemma model.
+
+```bash
+ollama list                      # see which tags you actually have installed
+export OLLAMA_MODEL=gemma4:31b   # use one of YOUR tags (tested: gemma4:31b)
+# OLLAMA_BASE_URL defaults to http://127.0.0.1:11434 and must be a loopback address
+```
+
+If `OLLAMA_MODEL` is unset, the engine uses the first installed `gemma*` tag. If Ollama is unreachable, the UI shows **model offline** and explanations come from a clearly labeled **MOCK** provider.
 
 ## Install & run
 
 ```bash
+git clone https://github.com/Paarth-K/hacktober-fest.git && cd hacktober-fest
 npm install
-npm run dev          # engine + Tauri floating window (real mode)
-npm run dev:mock     # same, but seeded with the demo fixture project + mock AI
-npm run dev:web      # mock engine + Vite in a browser (no Rust needed); prints the URL
-npm run engine       # headless engine only (P2/P3 development)
-npm run check        # typecheck + tests
+npm run dev          # engine + floating Tauri window (real mode, your workspaces)
 ```
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Starts the Node engine, then `tauri dev` with the engine's port/token. Real observer, real checks, Gemma if available |
+| `npm run dev:mock` | The same, seeded with a demo project (every task status), mock AI and a fake live change after 3 s. State goes to a temp dir |
+| `npm run dev:web` | Mock engine + Vite only (no Rust needed). Open the URL it prints |
+| `npm run engine` | Headless engine. Prints `LCC_ENGINE_READY {"port":…,"token":…}` |
+| `npm run check` | Strict typecheck + all Vitest suites + AI provider tests |
+| `npm run gate` | End-to-end gate against the real engine with real file edits and real check commands (mock AI) |
+| `npm run gate:live` | Same gate using live Ollama/Gemma (set `OLLAMA_MODEL`) |
+| `npm run smoke:gemma` | Live Gemma explanation / follow-up / breakdown through the engine's adapter |
+
+> Windows: the `gate` scripts use a POSIX env prefix. In PowerShell run `$env:LCC_MODEL_PROVIDER="mock"; npx tsx scripts/e2e-gate.ts`.
+
+## Demo walkthrough
+
+1. `npm run dev`. The window opens always-on-top at 380×640. Use the pin toggle to unpin it, and compact mode to collapse it to a strip.
+2. Pick a workspace folder and type the project goal.
+3. Add tasks with acceptance criteria. You can type them, paste the prompt you gave your coding agent, or ask for an AI breakdown. Review and edit the breakdown, then accept it (it doesn't count until you do).
+4. Configure a check command, e.g. `npm test`, and link criteria to it.
+5. Let your coding agent edit files. Changes appear within a few seconds with real diffs and a **suggested** task. Accept the suggestion and the task moves to *activity detected*, while the percentage stays the same.
+6. Click **Verify**. The exact command runs in the workspace with a timeout. On a pass, linked criteria are met and the task becomes *verified complete*. On a fail, it goes to *needs verification*. If a check that used to pass now fails, the task is flagged as a **regression**.
+7. Ask for an explanation (beginner / intermediate / expert), ask a follow-up question, or take a mini quiz. Each answer cites file:line ranges that come only from observed evidence.
+8. **Export report** copies a Markdown progress report or saves it to `<workspace>/.local-code-companion/progress-report.md`.
 
 ## Architecture
 
-- `src-tauri/`: thin Rust shell (window, folder picker, open-in-editor, engine connection).
-- `src/ui/`: React + TypeScript UI in the webview.
-- Node engine (`src/engine/main.ts`): observer, context, AI, core/progress, storage. It talks to the UI over a WebSocket on 127.0.0.1 with a random port and a per-launch token.
-- State is stored as JSON in the OS app-data directory (`~/Library/Application Support/local-code-companion` on macOS, `%APPDATA%\local-code-companion` on Windows, `~/.local/share/local-code-companion` on Linux). Set `LCC_DATA_DIR` to override.
+```
+src-tauri/        Rust shell: window (always-on-top, compact mode, folder picker, open-in-editor with
+                  workspace path validation), engine_connection (per-launch port/token)
+src/ui/           React + TypeScript UI in the webview (P1)
+src/engine/       Node engine entry point: wires everything below
+src/shared/       Canonical Zod schemas, typed WS messages, EngineClient, Observer/ModelProvider interfaces
+src/core/         Progress engine (status rules, %), orchestrator, verification runner, Markdown report
+src/observer/     chokidar watcher, baselines, debounced batches, real diffs, ignores/secrets (P2)
+src/context/      Bounded context retrieval + change→task attribution hints (P2)
+src/ai/, skills/  Gemma/Ollama + deterministic mock learning service, prompts, guards (P3)
+src/integrations/ Loopback WebSocket bridge + canonical↔AI adapter
+```
 
-See [docs/INTEGRATION_CONTRACT.md](docs/INTEGRATION_CONTRACT.md) for schemas, messages, ownership and status rules.
+- The UI and engine talk over `ws://127.0.0.1:<random port>` with a per-launch token. The engine never listens on another interface.
+- State is stored as JSON in the OS app-data dir: `~/Library/Application Support/local-code-companion` (macOS), `%APPDATA%\local-code-companion` (Windows), `~/.local/share/local-code-companion` (Linux). Set `LCC_DATA_DIR` to override.
+- Ignored by the observer: `.git`, `node_modules`, `dist`, `build`, `target`, `.local-code-companion`, binaries, large files, and `.env` / keys / credentials. Secret files show up only as omissions and are never read or sent to the model.
+- The model gets only bounded excerpts. It is never shown the full repo, and nothing is sent to hosted models.
 
-## Honest progress rules
+Contract, message list and ownership: [docs/INTEGRATION_CONTRACT.md](docs/INTEGRATION_CONTRACT.md).
 
-Percent complete counts **only** tasks verified by a passing, user-run check command or explicitly confirmed by the user. Detected file activity and AI explanations never count as completion. Verification commands run only when you click **Verify**, and the exact command text is shown before it runs.
+## What was actually tested
 
-## Tested
+Machine B: macOS arm64, Node 24.21, rustc 1.99, Ollama `gemma4:31b`, `integration/mvp`.
 
-| What | Result | OS |
-|---|---|---|
-| `npm run typecheck` | PASS | macOS (arm64) |
-| `npm test` (schemas, progress rules, real verification processes, engine-over-WebSocket e2e incl. persistence) | PASS | macOS (arm64) |
-| `cargo build` of `src-tauri` | PASS | macOS (arm64) |
-| Windows / Linux | NOT TESTED | n/a |
+| Check | Result |
+|---|---|
+| `npm run check`: strict typecheck, 60 Vitest (schemas, progress rules, real check processes, engine-over-WS e2e, adapter, observer, context), 16 AI provider tests | PASS |
+| `npx vite build`, `cargo test` (open-file path safety) | PASS |
+| `npm run dev:mock`: Tauri window launches, UI connects to the engine | PASS (process + WS verified; visual check by P1) |
+| `npm run gate`: real uncommitted create/modify/delete → real hunks, `.env` excluded, suggested link not auto-applied, 0% after activity, failing check does not complete, passing check → verified (50%), report saved, relaunch persists | 19/19 PASS |
+| `npm run gate:live` with `gemma4:31b`: same + live explanation (17.6 s, 2 quiz questions, valid citations) + live follow-up (9.3 s) | 19/19 PASS |
+| Independent live Gemma on a second machine (P3 on A, P4 on B) | PASS on both |
+| P2 observer + context tests on Windows 11 | PASS (P2) |
+| Full app on Windows / Linux | **NOT TESTED** |
 
 ## Known limitations
 
-- Observer and AI are placeholder stubs on `main` until the P2/P3 branches are merged.
-- The engine runs as a Node process started by `npm run dev`. It is not yet bundled as a Tauri sidecar.
+- The engine runs as a separate Node process started by `npm run dev`. It is not yet bundled as a Tauri sidecar, so there is no single-binary install.
+- Only macOS has had a full app run. Windows has only had observer tests, and Linux is untested.
+- Checks run through the system shell with the exact text you configured. Only configure commands you trust.
+- Change→task attribution is heuristic (paths, keywords, previously linked files). It is always a suggestion.
+- Explanations are grounded in bounded excerpts and can still be wrong. They are never verification.
+- No tray icon, global shortcut, frameless window, or Git/PR integration (cut as stretch).
