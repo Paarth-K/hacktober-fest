@@ -4,12 +4,23 @@
 // command `engine_connection`). Pass --mock to run the engine in mock mode,
 // --no-tauri to run engine + Vite only (open http://localhost:1420/?port=..&token=..).
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
 
 const args = process.argv.slice(2);
 const mock = args.includes("--mock");
 const noTauri = args.includes("--no-tauri");
 const isWin = process.platform === "win32";
 const children = [];
+
+// rustup installs cargo to ~/.cargo/bin but a fresh install (or --no-modify-path) leaves it off PATH,
+// which makes `tauri dev` fail with "failed to run 'cargo metadata'".
+const cargoBin = join(process.env.CARGO_HOME ?? join(homedir(), ".cargo"), "bin");
+const pathKey = Object.keys(process.env).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+if (existsSync(cargoBin) && !(process.env[pathKey] ?? "").split(delimiter).includes(cargoBin)) {
+  process.env[pathKey] = `${cargoBin}${delimiter}${process.env[pathKey] ?? ""}`;
+}
 
 const engine = spawn(process.execPath, ["--import", "tsx", "src/engine/main.ts", ...(mock ? ["--mock"] : [])], {
   stdio: ["ignore", "pipe", "inherit"],
