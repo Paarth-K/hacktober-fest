@@ -9,7 +9,10 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             engine::engine_connection,
-            window::set_always_on_top
+            window::set_always_on_top,
+            window::set_compact_mode,
+            window::pick_workspace,
+            window::open_workspace_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running Local Code Companion");

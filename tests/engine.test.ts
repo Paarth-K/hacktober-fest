@@ -30,7 +30,7 @@ function next<T extends ServerEnvelope["type"]>(type: T, pred: (p: Extract<Serve
 }
 
 beforeAll(async () => {
-  engine = await startEngine({ dataDir, quiet: true });
+  engine = await startEngine({ dataDir, quiet: true, modelProvider: "mock" });
   client = new EngineClient({ port: engine.bridge.port, token: engine.bridge.token }, { WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket });
   client.onAny((e) => events.push(e));
   const first = next("state_snapshot");
@@ -141,7 +141,7 @@ describe("engine over websocket", () => {
   it("persists state across engine restart", async () => {
     client.close();
     await engine.stop();
-    engine = await startEngine({ dataDir, quiet: true });
+    engine = await startEngine({ dataDir, quiet: true, modelProvider: "mock" });
     const snap = engine.orchestrator.snapshot();
     expect(snap.project!.rootPath).toBe(workspace);
     expect(snap.tasks.find((t) => t.title === "Add login")!.status).toBe("verified_complete");
