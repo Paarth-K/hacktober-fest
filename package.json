@@ -17,7 +17,9 @@
     "test:ai": "tsx --test src/ai/tests/providers.node.ts",
     "gate": "tsx scripts/e2e-gate.ts --provider=mock",
     "gate:live": "tsx scripts/e2e-gate.ts --provider=auto",
-    "smoke:gemma": "tsx scripts/live-gemma-smoke.ts"
+    "smoke:gemma": "tsx scripts/live-gemma-smoke.ts",
+    "demo": "node scripts/demo.mjs",
+    "demo:agent": "node scripts/demo-agent.mjs"
   },
   "repository": {
     "type": "git",

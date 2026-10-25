@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Orchestrator } from "../core/orchestrator.js";
 import { createObserver } from "../observer/index.js";
-import { newId } from "../shared/events.js";
+import { makeEnvelope, newId } from "../shared/events.js";
 import { loadDemoFixture } from "../shared/fixtures.js";
 import type { ChangeBatch } from "../shared/schemas.js";
 import { createModelProvider } from "../integrations/aiAdapter.js";
@@ -24,6 +24,8 @@ export interface EngineOptions {
   quiet?: boolean;
   /** Overrides preferences.modelProvider (tests, LCC_MODEL_PROVIDER). */
   modelProvider?: "auto" | "mock" | "ollama";
+  /** Preselect this workspace folder at startup (LCC_WORKSPACE), as if the user had chosen it. */
+  workspace?: string;
 }
 
 export interface RunningEngine {
@@ -71,6 +73,10 @@ export async function startEngine(opts: EngineOptions = {}): Promise<RunningEngi
     onMessage: (env, reply) => orchestrator.handle(env, reply),
   });
   await orchestrator.start();
+  if (opts.workspace) {
+    await orchestrator.handle(makeEnvelope(sessionId, { type: "set_project" as const, payload: { rootPath: opts.workspace } }), () => {});
+    log(`workspace preselected: ${opts.workspace}`);
+  }
 
   let replayTimer: ReturnType<typeof setTimeout> | null = null;
   if (mock) replayTimer = setTimeout(() => observer.replayFixture(syntheticBatch(sessionId)), 3000);
@@ -136,6 +142,7 @@ if (isMain) {
     port: process.env.LCC_PORT ? Number(process.env.LCC_PORT) : undefined,
     token: process.env.LCC_TOKEN || undefined,
     modelProvider: (process.env.LCC_MODEL_PROVIDER as EngineOptions["modelProvider"]) || undefined,
+    workspace: process.env.LCC_WORKSPACE || undefined,
   });
   process.stdout.write(`LCC_ENGINE_READY ${JSON.stringify({ port: engine.bridge.port, token: engine.bridge.token })}\n`);
   const shutdown = async () => {

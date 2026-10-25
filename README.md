@@ -42,6 +42,17 @@ npm run dev          # engine + floating Tauri window (real mode, your workspace
 | `npm run smoke:gemma` | Live Gemma explanation / follow-up / breakdown through the engine's adapter |
 
 
+## Quick demo (one command)
+
+```bash
+npm run demo               # creates a small real Node project in your temp dir and opens the window on it
+npm run demo:agent -- login   # in a 2nd terminal: plays the coding agent (create/edit/delete files, uncommitted)
+npm run demo:agent -- break   # introduces a bug -> Verify shows a regression
+npm run demo:agent -- fix     # repairs it
+```
+
+The demo uses its own data dir, so your real projects aren't touched. `npm run demo -- --reset` starts over. In the window, type the goal (*Add token login to the demo API*), add the checks `npm test` and `node --test test/login.test.js`, then add a task whose criteria are linked to those checks.
+
 ## Demo walkthrough
 
 1. `npm run dev`. The window opens always-on-top at 380×640. Use the pin toggle to unpin it, and compact mode to collapse it to a strip.
