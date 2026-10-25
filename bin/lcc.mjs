@@ -4,7 +4,7 @@
 //   lcc ~/code/my-app   # on another folder
 //   lcc --window        # the floating desktop window (Tauri; source checkout only)
 // Installed package: runs the prebuilt bundle (dist-cli/lcc.mjs, made by `npm run build:cli` / on pack).
-// Source checkout (`npm link`): runs the TypeScript directly through tsx.
+// Source checkout (`npm link`): always runs the live TypeScript through tsx (LCC_FROM_BUNDLE=1 to test the bundle).
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -28,7 +28,7 @@ if (args.includes("--window")) {
     env: { ...process.env, LCC_WORKSPACE: folder },
   });
   child.on("exit", (code) => process.exit(code ?? 0));
-} else if (existsSync(source) && (!existsSync(bundle) || process.env.LCC_FROM_SOURCE === "1")) {
+} else if (existsSync(source) && process.env.LCC_FROM_BUNDLE !== "1") {
   // Dev: compile on the fly so edits take effect without rebuilding.
   const require = createRequire(import.meta.url);
   const { register } = await import(pathToFileURL(require.resolve("tsx/esm/api")).href);

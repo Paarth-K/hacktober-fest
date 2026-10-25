@@ -67,7 +67,7 @@ export const CLARIFY_STYLE: Record<Level, string> = {
 const RECHECK_NOTE = "The developer already answered the clarifications below. Only ask again if a CONSEQUENTIAL gap remains that the answers did not settle; otherwise return vague=false.";
 
 const REFINE_SYSTEM = `You write the final prompt that will be sent to an autonomous coding agent working in the developer's repository.
-Combine the developer's request and their answers into one clear, self-contained instruction: goal, concrete requirements, files/areas to touch if known, constraints (keep changes minimal, match existing style, do not touch unrelated code, do not commit), and how to check it works (tests to add or run).
+Combine the developer's request and their answers into one clear, self-contained, CONCISE instruction (under 150 words): goal, concrete requirements, files/areas to touch if known, constraints (keep changes minimal, match existing style, do not touch unrelated code, do not commit), and how to check it works (tests to add or run).
 Do not invent requirements the developer did not ask for; when something is unspecified, choose the simplest reasonable option and list it under "assumptions".
 Also give a short task title (max 8 words) and 1-4 concrete, checkable acceptance criteria for tracking progress (observable behavior, not implementation details; do not include "tests pass", that is added separately).
 ${UNTRUSTED}
@@ -152,7 +152,7 @@ export class VibeGemma {
     return this.modelPromise;
   }
 
-  private async chat<T>(system: string, user: unknown, schema: z.ZodType<T>): Promise<{ value: T; source: GemmaSource } | null> {
+  private async chat<T>(system: string, user: unknown, schema: z.ZodType<T>, maxTokens = 1200): Promise<{ value: T; source: GemmaSource } | null> {
     const model = await this.model();
     if (!model) {
       this.lastFailure = this.opts.provider === "mock" ? "mock selected" : "no local Gemma model reachable";
@@ -173,7 +173,7 @@ export class VibeGemma {
           format: jsonSchema(schema),
           think: false,
           keep_alive: "10m",
-          options: { temperature: 0.1, num_predict: 3000 },
+          options: { temperature: 0.1, num_predict: maxTokens },
           messages: [
             { role: "system", content: system },
             { role: "user", content: JSON.stringify(user) },
@@ -203,7 +203,7 @@ export class VibeGemma {
   /** prior = clarifications already answered (re-check round). */
   async clarify(prompt: string, ws: WorkspaceSummary, prior: z.infer<typeof QA>[] = [], level: Level = "intermediate"): Promise<ClarifyResult> {
     const system = `${CLARIFY_SYSTEM}\n${CLARIFY_STYLE[level]}${prior.length ? `\n${RECHECK_NOTE}` : ""}`;
-    const out = await this.chat(system, { request: prompt, ...(prior.length ? { answeredClarifications: prior } : {}), workspace: ws }, ClarifyOut);
+    const out = await this.chat(system, { request: prompt, ...(prior.length ? { answeredClarifications: prior } : {}), workspace: ws }, ClarifyOut, 300);
     if (out) {
       const base = prior.length;
       const max = level === "beginner" ? 2 : 3;
@@ -216,7 +216,7 @@ export class VibeGemma {
 
   async refine(prompt: string, qa: { question: string; answer: string }[], ws: WorkspaceSummary, level: Level = "intermediate"): Promise<RefineResult> {
     const titleStyle = level === "beginner" ? "\nWrite the task title and acceptance criteria in everyday, non-technical words." : "";
-    const out = await this.chat(REFINE_SYSTEM + titleStyle, { request: prompt, clarifications: qa, workspace: ws }, RefineOut);
+    const out = await this.chat(REFINE_SYSTEM + titleStyle, { request: prompt, clarifications: qa, workspace: ws }, RefineOut, 700);
     if (out) return { title: out.value.title.trim(), refinedPrompt: out.value.refinedPrompt.trim(), assumptions: out.value.assumptions, acceptanceCriteria: out.value.acceptanceCriteria, source: out.source };
     return { ...templateRefine(prompt, qa), source: this.template() };
   }
@@ -234,6 +234,7 @@ export class VibeGemma {
         earlierQuestions: input.previous.slice(-3),
       },
       AnswerOut,
+      500,
     );
     if (out) return { answer: out.value.answer, source: out.source };
     return { answer: `Gemma isn't available right now (${this.lastFailure ?? "no model"}), so this question can't be answered. Start Ollama and ask again.`, source: this.template() };
