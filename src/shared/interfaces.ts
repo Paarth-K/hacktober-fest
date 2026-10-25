@@ -63,4 +63,9 @@ export interface Observer {
   retrieveForQuestion(question: string, changeBatchIds: string[], options?: { maxChars?: number }): Promise<ContextPacket>;
   /** Ranked hints; [] when confidence is low. Never links anything itself. */
   suggestTasks(batch: ChangeBatch, tasks: Task[]): SuggestedTaskLink[];
+  /**
+   * Optional: seed the observer's batch memory with batches persisted by an earlier engine run so
+   * getContext works for them after relaunch. Must NOT call onBatch. Called once after start().
+   */
+  restoreBatches?(batches: ChangeBatch[]): void;
 }

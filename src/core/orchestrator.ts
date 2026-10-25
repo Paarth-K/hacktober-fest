@@ -115,6 +115,8 @@ export class Orchestrator {
         getTasks: () => this.ws()?.tasks ?? [],
         onError: (e) => this.log(`observer error: ${e.message}`),
       });
+      const persisted = this.state.workspaces[rootPath]?.changeBatches ?? [];
+      if (persisted.length) this.deps.observer.restoreBatches?.(persisted);
       this.log(`observer watching ${rootPath}`);
     } catch (e) {
       this.log(`observer failed to start: ${e instanceof Error ? e.message : e}`);
