@@ -61,6 +61,9 @@ lines. Unknown or expired batch IDs, including those from an earlier engine run,
 - `flush()` processes pending edits now ("Analyze now").
 - `rescan()` does a full reconcile.
 - `onBatch(cb)`, `status()` and `notifyPath(p)` are also available.
+- `restoreBatches(batches)` makes batches from an earlier engine run known again without emitting
+  them. Context for them is the stored diffs and evidence only; no excerpts, because the files may
+  have changed since those lines were recorded.
 
 ## Tests
 
