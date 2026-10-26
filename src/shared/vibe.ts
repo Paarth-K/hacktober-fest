@@ -121,6 +121,8 @@ export const VibeSessionSchema = z.object({
   allowCommands: z.boolean().default(false),
   /** "Done when" criteria Gemma wrote for this change. */
   criteria: z.array(z.string().max(300)).default([]),
+  /** Live check of each criterion while the agent works (updated as edits land; the report has the final say). */
+  criteriaLive: z.array(z.object({ met: z.boolean(), why: z.string().default("") })).default([]),
   /** Progress-tracking task created for this prompt (evidence + criteria live there). */
   taskId: IdSchema.optional(),
   /** Clarification rounds so far (Gemma re-checks after answers; max 2). */

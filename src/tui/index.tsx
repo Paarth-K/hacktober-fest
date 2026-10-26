@@ -52,9 +52,8 @@ let toaster: Toaster | null = null;
 if (args.includes("--prog")) {
   const helper = ensureToastHelper();
   if ("bin" in helper) {
-    toaster = new Toaster(helper.bin);
+    toaster = new Toaster(helper.bin, (event, request) => engine.orchestrator.narrate(event, request));
     client.onAny((e) => toaster?.onEvent(e));
-    toaster.show("Sidekick is watching your changes", "sparkles", 2.5);
   } else process.stderr.write(`${helper.error}\n`);
 }
 

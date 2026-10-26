@@ -159,6 +159,11 @@ export class Orchestrator {
     this.deps.store.save(this.state);
   }
 
+  /** A short Gemma-written progress line (for toasts). */
+  narrate(event: string, request: string): Promise<string | null> {
+    return this.gemma.narrate(event, request);
+  }
+
   /** Load the local Gemma model into memory ahead of the first request. */
   warmUpGemma(): Promise<void> {
     return this.gemma.warmUp();
