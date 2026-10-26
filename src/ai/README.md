@@ -1,6 +1,6 @@
-# P3 learning service
+# AI providers
 
-Owns only `src/ai` and `src/skills`. Entry point: `src/ai/index.ts`.
+The AI layer owns bounded explanations and task-breakdown suggestions. Its public entry point is `src/ai/index.ts`; the canonical engine adapter is `src/integrations/aiAdapter.ts`.
 
 ## Standalone commands
 
@@ -8,49 +8,29 @@ Owns only `src/ai` and `src/skills`. Entry point: `src/ai/index.ts`.
 npm ci --prefix src/ai
 npm run --prefix src/ai typecheck
 npm test --prefix src/ai
-ollama list
-OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:status
-OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:live
-OLLAMA_MODEL=gemma4:31b npm run --prefix src/ai smoke:observed
+OLLAMA_MODEL=<tag from `ollama list`> npm run --prefix src/ai smoke:live
+OLLAMA_MODEL=<tag from `ollama list`> npm run --prefix src/ai smoke:observed
+OLLAMA_MODEL=<tag from `ollama list`> npm run --prefix src/ai smoke:status
 ```
 
-Node tested: v26.7.0, macOS arm64. Node LTS, Windows and Linux have not been tested here. The tag above was actually installed on this machine; use your own installed Gemma tag. `OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434` and must resolve through a loopback hostname. Requests reject redirects. No hosted provider is implemented. The deadline budget default per request is 120 seconds.
+The standalone package uses local Ollama at `http://127.0.0.1:11434` by default. Set `OLLAMA_BASE_URL` only to a loopback address. The provider selects `OLLAMA_MODEL`, or the first installed `gemma*` tag when no model is configured. The root integration also supports a deterministic mock provider and falls back to labeled mock output when Ollama is unavailable.
 
-## Engine handoff
+## Engine boundary
 
 ```ts
-import { LearningService, MockProvider, OllamaProvider } from './ai/index.js';
+import { LearningService, MockProvider, OllamaProvider } from "./ai/index.js";
+
 const mock = new MockProvider();
-// Explicit deterministic operation; no Ollama needed:
 const output = await mock.explain(request);
-// Local inference with explicitly labeled fallback:
 const live = new LearningService(new OllamaProvider({ model: configuredTag }));
 const explanation = await live.explain(request);
 const suggestion = await live.breakdown({ goal, promptText });
-// Inspect live.lastFailure for a model error after either action.
 ```
 
-`ModelProvider` exposes `name`, `explain`, and `breakdown`. Input/output schemas and types are exported. `LearningService` catches model failures only; invalid caller inputs throw. Fallback outputs always have `mode: 'mock'` and `provider: 'deterministic-mock'`. The explanation includes the failure reason in uncertainties. Task breakdown fallback is labeled mock and `lastFailure` contains the reason. All breakdowns are suggestions; the caller must request user acceptance. No method mutates task state or computes progress.
+`LearningService` validates inputs and model output, bounds context, checks citations, and returns a deterministic mock response when the live provider fails. Breakdowns are suggestions only; the caller must request user acceptance before creating tasks. This layer does not mutate task state, compute progress, execute checks, or treat an explanation as verification.
 
-`ExplanationRequest.context` contains `excerpts: [{ evidence: { id, path, startLine, endLine, changeBatchId }, text }]`, `omissions: string[]`, and optional `verificationRuns: [{id,command,result,exitCode}]`. P2/P4 must supply freshly retrieved targeted excerpts for each follow-up. Ref line ranges are inclusive and refer to the supplied source text. `changeBatchIds` must include every context ref's batch. Ask for a quiz with `includeQuiz: true`. Levels are `beginner | intermediate | expert`.
+`ExplanationRequest.context` contains bounded excerpts with evidence IDs, omissions, and optional verification summaries. Follow-up questions should supply freshly retrieved context. Citation ranges are inclusive and must refer to the supplied excerpts.
 
-Shared M0 schemas were not yet published when this module was started. `contracts.ts` is a P3-local boundary, not a replacement for P4 canonical schemas. P4 should map canonical context into the packet above; once the canonical contract is available P3 can align imports. The private nested package provides independent tests without editing P4's root scaffold. Root integration should install Zod and its test tools or use the commands above.
+## Safety boundary
 
-`summarizeProgress(snapshot)` is deterministic wording from P4 facts only, always available without a model. The snapshot completion value is a fraction in [0, 1] per Prompt 0 and is formatted as a percentage. It does not compute completion from tasks, render a full evidence report, execute checks, or infer completion.
-
-## Boundaries
-
-Source excerpts are limited to 24,000 UTF-8 bytes (including ref metadata); oversized excerpts are omitted whole to preserve line-range meaning. Omission messages and verification summaries have separate small caps. Secret-like paths and common credential patterns are excluded. Secret heuristics are defense in depth; P2 remains responsible for filtering source files before retrieval. Goal/task/question text matching common secret patterns is rejected before local inference.
-
-JSON shape, citation IDs, paths, batches and line bounds are checked. Explicit slash-separated file references in prose are also checked. Invalid output is discarded, and the service can return an explicit mock. Prompts treat repository contents as untrusted data. These checks cannot prove semantic claims or prevent every prompt injection. Model content must remain explanation only and never affect verification or progress status. Conservative completion/test-success wording is rejected even when a supplied verification run might support it; P4's deterministic report is the authority for check results.
-
-The live smoke uses sample source excerpts, not the not-yet-integrated P2 watcher. A separate observed-edit regression creates and edits three files in an isolated temporary workspace, reads their real before/after contents, and submits bounded evidence. This tests inference from actual disk edits but does not validate P2 watcher integration. Live result artifacts record precise commands/output separately. No independent second-machine test is performed by P3.
-
-
-## P4 announcement alignment
-
-Merged the published M0 foundation without rewriting the pushed feature branch. P4 owns the canonical adapter in `src/integrations/aiAdapter.ts`; P3 boundary schemas remain as agreed in `M1-P4-to-P3-ALIGN-01`. Until P4 switches the engine import, `createModelProvider` re-exports the unchanged, explicitly mocked M0 factory from `foundation-placeholder.ts`. This compatibility entry is not the live P3 service. Use the provider classes above for live inference.
-
-`OllamaProvider.status()` performs only `GET /api/tags`, bounds the response and times out after at most five seconds. It never throws and returns `{provider, state: 'real'|'offline', model, detail}`. A reachable server without the configured model returns offline with a distinct detail. `state: 'real'` confirms reachability and installed tag; it does not mean inference ran. `MockProvider.status()` returns mock. `LearningService.status()` delegates to the primary provider so outages remain visible.
-
-P3's Node test file uses `.node.ts` so root Vitest does not accidentally collect a Node test-runner suite. Run both the root `npm run check` and standalone AI test command.
+Context is capped by size, secret-like paths and credential patterns are excluded, and repository text is treated as untrusted data rather than instructions. Invalid JSON, citations, paths, or line ranges are rejected or converted to an explicitly labeled mock result. These checks reduce risk but cannot prove semantic correctness; the deterministic progress and verification layers remain authoritative.
