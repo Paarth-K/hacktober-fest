@@ -67,6 +67,8 @@
   "files": [
     "bin",
     "dist-cli",
-    "README.md"
+    "README.md",
+    "toasts/Package.swift",
+    "toasts/Sources"
   ]
 }

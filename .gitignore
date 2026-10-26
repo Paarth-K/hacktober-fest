@@ -10,3 +10,4 @@ src-tauri/gen/
 .env.*
 .lcc-data/
 dist-cli/
+toasts/.build/

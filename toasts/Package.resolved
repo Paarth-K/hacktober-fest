@@ -1,0 +1,13 @@
+{
+  "pins" : [
+    {
+      "identity" : "mactoastkit",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/daniyalmaster693/MacToastKit",
+      "state" : {
+        "revision" : "108f8957c1e05326f191de6dc05851fe1bbc8948"
+      }
+    }
+  ],
+  "version" : 2
+}
