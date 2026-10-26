@@ -13,8 +13,9 @@ struct ToastMessage: Decodable {
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
 
-// One controller reused for every toast so new ones replace the previous at top-right.
-let toast = MainActor.assumeIsolated { ToastWindowController() }
+// A fresh controller per toast (MacToastKit doesn't re-show a reused one after it fades);
+// keep each alive until its toast has finished.
+var live: [ToastWindowController] = []
 
 // Read stdin on a background thread; show each toast on the main actor. Quit when stdin closes (Sidekick exited).
 Thread.detachNewThread {
@@ -23,12 +24,18 @@ Thread.detachNewThread {
               let msg = try? JSONDecoder().decode(ToastMessage.self, from: data) else { continue }
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
+                let toast = ToastWindowController()
+                live.append(toast)
+                let duration = msg.duration ?? 3
                 toast.showToast(
                     message: msg.message,
                     icon: msg.icon.map { Image(systemName: $0) },
-                    duration: msg.duration ?? 3,
+                    duration: duration,
                     position: .topRight(20)
                 )
+                DispatchQueue.main.asyncAfter(deadline: .now() + duration + 2) {
+                    live.removeAll { $0 === toast }
+                }
             }
         }
     }

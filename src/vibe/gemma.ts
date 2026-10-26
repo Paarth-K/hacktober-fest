@@ -369,6 +369,23 @@ export class VibeGemma {
     return { answer: `Gemma isn't available right now (${this.lastFailure ?? "no model"}), so this question can't be answered. Start Ollama and ask again.`, source: this.template() };
   }
 
+  /** Which criteria the diffs so far already satisfy. Null when the model is unavailable. */
+  async checkCriteria(criteria: string[], request: string, context: ContextPacket): Promise<{ met: boolean; why: string }[] | null> {
+    if (!criteria.length) return [];
+    const out = await this.chat(CRITERIA_SYSTEM, { request, criteria: criteria.map((text, index) => ({ index, text })), diffs: boundDiffs(context, 12_000) }, CriteriaOut, 300);
+    if (!out) return null;
+    return criteria.map((_, i) => {
+      const c = out.value.criteria.find((x) => x.index === i);
+      return { met: c?.met ?? false, why: c?.why ?? "" };
+    });
+  }
+
+  /** A short, specific status line for a progress toast. */
+  async narrate(event: string, request: string): Promise<string | null> {
+    const out = await this.chat(NARRATE_SYSTEM, { event, request }, NarrateOut, 40);
+    return out?.value.text.trim() || null;
+  }
+
   async planLaunch(input: { workspace: WorkspaceSummary; latestChange: string; hasNodeModules: boolean; previousAttempts: { command: string; error: string }[] }): Promise<LaunchPlan | null> {
     const out = await this.chat(LAUNCH_SYSTEM, input, LaunchOut, 300);
     if (!out) return null;
@@ -486,6 +503,15 @@ const LaunchOut = z.object({
   file: z.string().max(500).optional(),
   why: z.string().max(500).default(""),
 });
+
+const CRITERIA_SYSTEM = `A coding agent is in the middle of changing a repository. For each "done when" criterion, decide from the diffs SO FAR whether it is already done (met). Only mark met when the diffs clearly show it. Keep "why" under 12 words.
+${UNTRUSTED}
+Return JSON: {"criteria": [{"index": 0, "met": true, "why": "..."}]}.`;
+const CriteriaOut = z.object({ criteria: z.array(z.object({ index: z.number().int().nonnegative(), met: z.boolean(), why: z.string().max(200).default("") })).max(10) });
+
+const NARRATE_SYSTEM = `Write ONE short, friendly progress update (max 9 words) for a non-technical person watching an AI build their request. Mention what is happening in concrete terms from the context (e.g. "Claude is wiring up your dark theme toggle"). No quotes, no emojis.
+Return JSON: {"text": "..."}.`;
+const NarrateOut = z.object({ text: z.string().min(1).max(120) });
 
 export interface AnswerResult {
   answer: string;

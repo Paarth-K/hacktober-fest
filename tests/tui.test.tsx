@@ -33,7 +33,7 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 const AT = new Date().toISOString();
 const session = (over: Partial<VibeSession>): VibeSession => ({
   id: "v1", createdAt: AT, updatedAt: AT, originalPrompt: "change the theme to dark mode", agent: "claude", phase: "clarifying",
-  level: "beginner", qa: [], criteria: [], review: false, allowCommands: true, questions: [], clarifyRounds: 0, answers: {}, assumptions: [],
+  level: "beginner", qa: [], criteria: [], criteriaLive: [], review: false, allowCommands: true, questions: [], clarifyRounds: 0, answers: {}, assumptions: [],
   events: [], changeBatchIds: [], touched: [], parallel: false, verificationRunIds: [], ...over,
 });
 const report = {
@@ -169,6 +169,11 @@ describe("terminal UI flow", () => {
     engine.emit("vibe_updated", session({ phase: "running", criteria: ["Background is dark", "Text is readable"], run: { ...run, outcome: "running" } }));
     await tick();
     expect(lastFrame()).toContain("○ Background is dark");
+    // Live: Gemma sees the first item done while Claude is still working -> ticks off immediately.
+    engine.emit("vibe_updated", session({ phase: "running", criteria: ["Background is dark", "Text is readable"], criteriaLive: [{ met: true, why: "dark body color" }, { met: false, why: "" }], run: { ...run, outcome: "running" } }));
+    await tick();
+    expect(lastFrame()).toContain("✔ Background is dark");
+    expect(lastFrame()).toContain("○ Text is readable");
     engine.emit("vibe_updated", session({ phase: "reporting", criteria: ["Background is dark", "Text is readable"], run }));
     engine.emit("vibe_updated", session({ phase: "done", criteria: ["Background is dark", "Text is readable"], run, report: { ...report, criteriaStatus: [{ text: "Background is dark", met: true, why: "body color set to #111" }, { text: "Text is readable", met: false, why: "" }] } }));
     await tick();
@@ -181,9 +186,10 @@ describe("terminal UI flow", () => {
 
   it("changes list: arrow keys open a past change", async () => {
     const { engine, lastFrame, stdin } = setup();
+    const NOW = new Date().toISOString(); // after the app's session start, so they count as this session
     const hist = [
-      { id: "v2", createdAt: AT, originalPrompt: "add a contact page", agent: "claude", phase: "done", filesChanged: 2, verified: "pass" },
-      { id: "v1", createdAt: AT, originalPrompt: "change the theme to dark mode", agent: "claude", phase: "done", filesChanged: 1, verified: "none" },
+      { id: "v2", createdAt: NOW, originalPrompt: "add a contact page", agent: "claude", phase: "done", filesChanged: 2, verified: "pass" },
+      { id: "v1", createdAt: NOW, originalPrompt: "change the theme to dark mode", agent: "claude", phase: "done", filesChanged: 1, verified: "none" },
     ];
     engine.emit("state_snapshot", snapshot(null, hist));
     await tick();

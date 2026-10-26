@@ -136,7 +136,7 @@ export function ProgressPane({ vibe, task, changeBatches, runs, now, othersRunni
           <Box key={s.label} flexDirection="column">
             <Box gap={1}>
               {s.state === "active" ? <Spinner /> : <Text color={s.state === "done" ? "green" : s.state === "failed" ? "red" : "gray"}>{s.state === "done" ? "✔" : s.state === "failed" ? "✖" : "○"}</Text>}
-              <Text color={s.state === "todo" ? "gray" : undefined} bold={s.state === "active"}>{s.label}</Text>
+              <Text color={s.state === "todo" ? "gray" : s.state === "done" ? "green" : undefined} bold={s.state === "active"} strikethrough={s.state === "done"} dimColor={s.state === "done"}>{s.label}</Text>
               {s.state === "active" && vibe.phase === "running" && vibe.run && <Text dimColor>{elapsed(vibe.run.startedAt, now)}</Text>}
             </Box>
             {s.state === "active" && vibe.phase === "running" && <Text color="cyan">{`    ${currentActivity(vibe)}…`}</Text>}
@@ -163,19 +163,25 @@ export function ProgressPane({ vibe, task, changeBatches, runs, now, othersRunni
         <Box flexDirection="column">
           <Text bold>Done when</Text>
           {vibe.criteria.map((c, i) => {
-            const st = vibe.report?.criteriaStatus[i];
-            const state = st ? (st.met ? "met" : "not") : vibe.phase === "running" || vibe.phase === "reporting" ? "pending" : "unknown";
+            // Final report wins; while Claude works, items tick off live as Gemma sees them done.
+            const fin = vibe.report?.criteriaStatus[i];
+            const live = vibe.criteriaLive[i];
+            const st = fin ?? live;
+            const state = st?.met ? "met" : fin ? "not" : "pending";
             return (
-              <Text key={c} wrap="wrap" color={state === "met" ? "green" : state === "not" ? "yellow" : "gray"}>
-                {`  ${state === "met" ? "✔" : state === "not" ? "✖" : "○"} ${c}`}
-                {st?.why ? <Text dimColor>{` — ${st.why}`}</Text> : null}
-              </Text>
+              <Box key={c}>
+                <Text color={state === "met" ? "green" : state === "not" ? "yellow" : "gray"}>{`  ${state === "met" ? "✔" : state === "not" ? "✖" : "○"} `}</Text>
+                <Text wrap="wrap" color={state === "met" ? "green" : state === "not" ? "yellow" : undefined} strikethrough={state === "met"} dimColor={state === "met"}>
+                  {c}
+                </Text>
+                {st?.why && state !== "pending" ? <Text dimColor wrap="truncate-end">{` — ${st.why}`}</Text> : null}
+              </Box>
             );
           })}
           {vibe.suggestedCheck && (
-            <Text color={!lastRun ? "gray" : lastRun.result === "pass" ? "green" : "red"}>{`  ${!lastRun ? "○" : lastRun.result === "pass" ? "✔" : "✖"} Tests pass (${vibe.suggestedCheck})`}</Text>
+            <Text color={!lastRun ? "gray" : lastRun.result === "pass" ? "green" : "red"} strikethrough={lastRun?.result === "pass"}>{`  ${!lastRun ? "○" : lastRun.result === "pass" ? "✔" : "✖"} Tests pass (${vibe.suggestedCheck})`}</Text>
           )}
-          {vibe.report && <Text dimColor>✔/✖ checked by Gemma against the actual changes.</Text>}
+          <Text dimColor>{vibe.report ? "✔/✖ checked by Gemma against the actual changes." : "Ticks off as Claude's edits land (checked by Gemma)."}</Text>
         </Box>
       )}
       {vibe.phase === "done" && vibe.suggestedCheck && <Text dimColor>{`Press T to check that everything still works (runs ${vibe.suggestedCheck}).`}</Text>}

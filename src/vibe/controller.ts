@@ -115,6 +115,7 @@ export class VibeController {
       this.collecting.get(id)!.lastBatchAt = Date.now();
       this.update(id, { changeBatchIds: [...s.changeBatchIds, batch.id] });
       if (s.taskId && targets.length === 1) this.deps.linkBatch?.(batch.id, s.taskId);
+      this.scheduleCriteriaCheck(id);
     }
   }
 
@@ -169,6 +170,7 @@ export class VibeController {
       allowCommands,
       level,
       criteria: [],
+      criteriaLive: [],
       qa: [],
       questions: [],
       clarifyRounds: 0,
@@ -273,6 +275,7 @@ export class VibeController {
       verificationRunIds: [],
       touched: [],
       parallel: false,
+      criteriaLive: [],
       report: undefined,
       error: undefined,
       run: { agent, command: desc.display({ allowCommands }), allowCommands, startedAt, outcome: "running" },
@@ -399,6 +402,42 @@ export class VibeController {
       : cur.report;
     this.update(vibeId, { verificationRunIds: ids, ...(report ? { report } : {}) });
     this.deps.changed?.();
+  }
+
+  private criteriaTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private criteriaBusy = new Set<string>();
+
+  /** Re-check the "done when" list against the edits so far, a moment after edits land (one check at a time). */
+  private scheduleCriteriaCheck(vibeId: string): void {
+    const s = this.find(vibeId);
+    if (!s?.criteria.length) return;
+    clearTimeout(this.criteriaTimers.get(vibeId));
+    this.criteriaTimers.set(
+      vibeId,
+      setTimeout(() => void this.checkCriteriaNow(vibeId), 1500),
+    );
+  }
+
+  private async checkCriteriaNow(vibeId: string): Promise<void> {
+    if (this.criteriaBusy.has(vibeId)) return this.scheduleCriteriaCheck(vibeId);
+    const s = this.find(vibeId);
+    if (!s || s.report || !s.criteria.length) return;
+    this.criteriaBusy.add(vibeId);
+    try {
+      let context = await this.deps.observer.getContext(s.changeBatchIds, { maxChars: 20_000 });
+      if (s.parallel && s.touched.length) {
+        const mine = new Set(s.touched);
+        context = { ...context, diffs: context.diffs.filter((d) => mine.has(d.path)), evidence: context.evidence.filter((e) => mine.has(e.path)) };
+      }
+      const live = await this.deps.gemma().checkCriteria(s.criteria, s.originalPrompt, context);
+      const cur = this.find(vibeId);
+      // Items only move forward while running (no flicker back to unchecked); the final report decides.
+      if (live && cur && !cur.report) this.update(vibeId, { criteriaLive: live.map((c, i) => (cur.criteriaLive[i]?.met ? cur.criteriaLive[i]! : c)) });
+    } catch (e) {
+      this.deps.log(`criteria check failed: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      this.criteriaBusy.delete(vibeId);
+    }
   }
 
   /** Wait until the observer has been quiet for settleQuietMs (it debounces bursts), bounded by settleMaxMs. */
