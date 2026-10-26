@@ -53,3 +53,39 @@ describe("terminal UI + real engine", () => {
     client.close();
   }, 90_000);
 });
+
+describe("parallel changes (real engine)", () => {
+  it("two agents at once: each change gets only its own files; the second is told about the first", async () => {
+    const ws = mkdtempSync(join(tmpdir(), "lcc-par-ws-"));
+    writeFileSync(join(ws, "README.md"), "# x\n");
+    const prompts: string[] = [];
+    const gemma = new VibeGemma({ provider: "mock" });
+    const origRefine = gemma.refine.bind(gemma);
+    gemma.refine = async (p, qa, w, level, onThinking, otherWork = []) => {
+      const r = await origRefine(p, qa, w, level, onThinking, otherWork);
+      prompts.push(JSON.stringify(otherWork));
+      return r;
+    };
+    const eng = await startEngine({
+      dataDir: mkdtempSync(join(tmpdir(), "lcc-par-data-")), quiet: true, modelProvider: "mock", workspace: ws,
+      gemma: () => gemma,
+      vibe: { env: { ...process.env, LCC_CLAUDE_BIN: process.execPath, LCC_CLAUDE_PREFIX_ARGS: JSON.stringify([FAKE]) }, settleQuietMs: 2500, settleMaxMs: 8000 },
+    });
+    try {
+      const o = eng.orchestrator;
+      const env = (type: string, payload: unknown) => ({ sessionId: "t", eventId: `e${Math.random()}`, timestamp: new Date().toISOString(), type, payload }) as never;
+      const startChange = (p: string) => o.handle(env("vibe_start", { prompt: p, agent: "claude", review: false, allowCommands: true, level: "expert" }), () => {});
+      await startChange("Please create the file FILE=src/alpha.js with a constant, WAIT a bit, and keep everything else untouched");
+      await wait(() => o.state.workspaces[ws]!.vibeSessions[0]?.phase === "running", 10_000);
+      await wait(() => [...(o.state.workspaces[ws]!.vibeSessions[0]?.events ?? [])].some((e) => e.kind === "tool"), 10_000);
+      await startChange("Please create the file FILE=src/beta.js with a constant, WAIT a bit, and keep everything else untouched");
+      await wait(() => o.state.workspaces[ws]!.vibeSessions.length === 2 && o.state.workspaces[ws]!.vibeSessions.every((s) => s.phase === "done"), 40_000);
+      const [a, b] = o.state.workspaces[ws]!.vibeSessions;
+      expect(a!.report!.changes.map((c) => c.path)).toEqual(["src/alpha.js"]);
+      expect(b!.report!.changes.map((c) => c.path)).toEqual(["src/beta.js"]);
+      expect(prompts[1]).toContain("src/alpha.js"); // Gemma was told what the other agent is touching
+    } finally {
+      await eng.stop();
+    }
+  }, 60_000);
+});

@@ -198,7 +198,6 @@ function Report({ vibe, onOpenFile, onNotice, onRegenerate, onRerun }: { vibe: V
       <List title="Risks" items={r.risks} cls="warn" />
       <List title="Tradeoffs" items={r.tradeoffs} />
       <List title="Next steps" items={r.nextSteps} />
-      {r.learningQuestion && <details className="learning-q"><summary><strong>Learn:</strong> {r.learningQuestion.question}</summary><p className="small">{r.learningQuestion.answer}</p></details>}
       {r.invalidCitations.length > 0 && <p className="muted small">{r.invalidCitations.length} unsupported reference(s) from the model were discarded.</p>}
       {vibe.run?.finalMessage && <details><summary>Agent's own summary (a claim, not evidence)</summary><p className="small pre">{vibe.run.finalMessage}</p></details>}
       <p className="muted small">Based only on file changes observed during the run. A report is not verification — run your tests.</p>

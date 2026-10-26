@@ -6,7 +6,12 @@ import { z } from "zod";
 import type { ContextPacket, Level, VerificationRun } from "../shared/schemas.js";
 import type { ClarifyQuestion, GemmaSource, VibeReport } from "../shared/vibe.js";
 
+export type Thinking = (textSoFar: string) => void;
+
 export interface GemmaOptions {
+  /** Let Gemma reason before answering ("low" is a good balance); streamed to the UI via onThinking. */
+  think?: boolean | "low" | "medium" | "high";
+  numCtx?: number;
   provider: "auto" | "mock" | "ollama";
   baseUrl?: string;
   model?: string;
@@ -38,6 +43,9 @@ export interface RefineResult {
 }
 export interface ReportInput {
   level?: Level;
+  /** "Done when" criteria to check against the diffs. */
+  criteria?: string[];
+  onThinking?: Thinking;
   originalPrompt: string;
   refinedPrompt: string;
   agentName: string;
@@ -76,10 +84,10 @@ Return JSON: {"title": "...", "refinedPrompt": "...", "assumptions": ["..."], "a
 const REPORT_SYSTEM = `You explain to a developer what a coding agent actually changed in their repository, based ONLY on the observed diffs provided.
 Never claim something changed unless the diff shows it. Never claim code works, tests pass, or the task is complete: diffs are not verification. The agent's own final message is a claim, not evidence; if it claims something the diffs do not show, say so.
 For each changed file give one plain-language line. List which parts of the request the diffs address. "notAddressed" lists ONLY parts of the developer's own request that the diffs do not show, phrased in the developer's terms; never list testing/verification status, missing diffs, or files the agent chose not to use. Note risks, and design tradeoffs only when the diff actually shows a choice. Suggest concrete next steps (e.g. run tests).
-Add one short learning question (with its answer) that helps the developer understand an idea used in this change, grounded in the diff.
+For each item in "criteria", say whether the diffs show it is done (met) with a few words of why. Judge only from the diffs; if unsure, met=false.
 Cite evidence with exact paths and line ranges from the provided evidence list only.
 ${UNTRUSTED}
-Return JSON: {"summary": "2-4 sentences", "files": [{"path": "...", "what": "..."}], "addressed": ["..."], "notAddressed": ["..."], "risks": ["..."], "tradeoffs": ["..."], "nextSteps": ["..."], "learningQuestion": {"question": "...", "answer": "..."}, "citations": [{"path": "...", "startLine": 1, "endLine": 1}]}.`;
+Return JSON: {"summary": "2-4 sentences", "files": [{"path": "...", "what": "..."}], "addressed": ["..."], "notAddressed": ["..."], "risks": ["..."], "tradeoffs": ["..."], "nextSteps": ["..."], "criteria": [{"index": 0, "met": true, "why": "..."}], "citations": [{"path": "...", "startLine": 1, "endLine": 1}]}.`;
 
 /** Audience instructions for explanations. */
 export const LEVEL_STYLE: Record<Level, string> = {
@@ -117,7 +125,7 @@ const ReportOut = z.object({
   risks: z.array(z.string().max(500)).max(20).default([]),
   tradeoffs: z.array(z.string().max(500)).max(10).default([]),
   nextSteps: z.array(z.string().max(500)).max(20).default([]),
-  learningQuestion: z.object({ question: z.string().min(1).max(500), answer: z.string().min(1).max(1500) }).optional(),
+  criteria: z.array(z.object({ index: z.number().int().nonnegative(), met: z.boolean(), why: z.string().max(300).default("") })).max(10).default([]),
   citations: z.array(z.object({ path: z.string(), startLine: z.number().int().positive(), endLine: z.number().int().positive() })).max(40).default([]),
 });
 
@@ -152,12 +160,25 @@ export class VibeGemma {
     return this.modelPromise;
   }
 
-  private async chat<T>(system: string, user: unknown, schema: z.ZodType<T>, maxTokens = 1200): Promise<{ value: T; source: GemmaSource } | null> {
+  /** Load the model into memory ahead of the first request (first call otherwise pays the load time). */
+  async warmUp(): Promise<void> {
+    const model = await this.model();
+    if (!model) return;
+    try {
+      await this.fetcher(`${this.baseUrl}/api/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model, prompt: "", keep_alive: "30m" }) });
+    } catch {
+      /* best effort */
+    }
+  }
+
+  /** Streams the reply; thinking text (when enabled) is forwarded live via onThinking. */
+  private async chat<T>(system: string, user: unknown, schema: z.ZodType<T>, maxTokens = 1200, onThinking?: Thinking): Promise<{ value: T; source: GemmaSource } | null> {
     const model = await this.model();
     if (!model) {
       this.lastFailure = this.opts.provider === "mock" ? "mock selected" : "no local Gemma model reachable";
       return null;
     }
+    const think = this.opts.think ?? false;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 180_000);
     try {
@@ -168,12 +189,13 @@ export class VibeGemma {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           model,
-          stream: false,
+          stream: true,
           // Structured output: Ollama constrains generation to this JSON schema.
           format: jsonSchema(schema),
-          think: false,
-          keep_alive: "10m",
-          options: { temperature: 0.1, num_predict: maxTokens },
+          think,
+          keep_alive: "30m",
+          // Small context window: our prompts fit in 8k; the model default (262k) makes every call slower.
+          options: { temperature: 0.1, num_predict: maxTokens + (think ? 2500 : 0), num_ctx: this.opts.numCtx ?? 8192 },
           messages: [
             { role: "system", content: system },
             { role: "user", content: JSON.stringify(user) },
@@ -181,9 +203,39 @@ export class VibeGemma {
         }),
       });
       if (!res.ok) throw new GemmaError(`Ollama HTTP ${res.status}`);
-      const text = await res.text();
-      if (text.length > 400_000) throw new GemmaError("Ollama response too large");
-      const content = z.object({ message: z.object({ content: z.string() }) }).parse(JSON.parse(text)).message.content;
+      let content = "";
+      let thinking = "";
+      let buf = "";
+      const handle = (line: string) => {
+        if (!line.trim()) return;
+        const m = JSON.parse(line) as { message?: { content?: string; thinking?: string }; error?: string };
+        if (m.error) throw new GemmaError(m.error);
+        if (m.message?.thinking) {
+          thinking += m.message.thinking;
+          onThinking?.(thinking);
+        }
+        if (m.message?.content) {
+          content += m.message.content;
+          // Without reasoning mode, show the answer itself as it is written (free; no extra tokens).
+          if (!think && onThinking) onThinking(jsonPreview(content));
+        }
+        if (content.length > 400_000) throw new GemmaError("Ollama response too large");
+      };
+      const reader = res.body?.getReader();
+      if (reader) {
+        const dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i: number;
+          while ((i = buf.indexOf("\n")) >= 0) {
+            handle(buf.slice(0, i));
+            buf = buf.slice(i + 1);
+          }
+        }
+        handle(buf);
+      } else handle(await res.text());
       const cleaned = content.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1");
       const value = schema.parse(JSON.parse(cleaned));
       this.lastFailure = undefined;
@@ -201,9 +253,9 @@ export class VibeGemma {
   }
 
   /** prior = clarifications already answered (re-check round). */
-  async clarify(prompt: string, ws: WorkspaceSummary, prior: z.infer<typeof QA>[] = [], level: Level = "intermediate"): Promise<ClarifyResult> {
+  async clarify(prompt: string, ws: WorkspaceSummary, prior: z.infer<typeof QA>[] = [], level: Level = "intermediate", onThinking?: Thinking): Promise<ClarifyResult> {
     const system = `${CLARIFY_SYSTEM}\n${CLARIFY_STYLE[level]}${prior.length ? `\n${RECHECK_NOTE}` : ""}`;
-    const out = await this.chat(system, { request: prompt, ...(prior.length ? { answeredClarifications: prior } : {}), workspace: ws }, ClarifyOut, 300);
+    const out = await this.chat(system, { request: prompt, ...(prior.length ? { answeredClarifications: prior } : {}), workspace: ws }, ClarifyOut, 300, onThinking);
     if (out) {
       const base = prior.length;
       const max = level === "beginner" ? 2 : 3;
@@ -214,14 +266,17 @@ export class VibeGemma {
     return prior.length ? { vague: false, reason: "Clarifications received (template check; no model).", questions: [], source: this.template() } : { ...templateClarify(prompt), source: this.template() };
   }
 
-  async refine(prompt: string, qa: { question: string; answer: string }[], ws: WorkspaceSummary, level: Level = "intermediate"): Promise<RefineResult> {
+  async refine(prompt: string, qa: { question: string; answer: string }[], ws: WorkspaceSummary, level: Level = "intermediate", onThinking?: Thinking, otherWork: { request: string; files: string[] }[] = []): Promise<RefineResult> {
     const titleStyle = level === "beginner" ? "\nWrite the task title and acceptance criteria in everyday, non-technical words." : "";
-    const out = await this.chat(REFINE_SYSTEM + titleStyle, { request: prompt, clarifications: qa, workspace: ws }, RefineOut, 700);
+    const parallel = otherWork.length
+      ? "\nOTHER CODING AGENTS ARE WORKING IN THIS REPOSITORY RIGHT NOW (listed in otherAgentsWorking). Tell this agent explicitly not to edit the files they are changing and to keep away from their areas; if this request must touch one of those files, say so in assumptions."
+      : "";
+    const out = await this.chat(REFINE_SYSTEM + titleStyle + parallel, { request: prompt, clarifications: qa, workspace: ws, ...(otherWork.length ? { otherAgentsWorking: otherWork } : {}) }, RefineOut, 700, onThinking);
     if (out) return { title: out.value.title.trim(), refinedPrompt: out.value.refinedPrompt.trim(), assumptions: out.value.assumptions, acceptanceCriteria: out.value.acceptanceCriteria, source: out.source };
     return { ...templateRefine(prompt, qa), source: this.template() };
   }
 
-  async answer(question: string, level: Level, input: { originalPrompt: string; reportSummary?: string; context: ContextPacket; previous: { question: string; answer: string }[] }): Promise<AnswerResult> {
+  async answer(question: string, level: Level, input: { originalPrompt: string; reportSummary?: string; context: ContextPacket; previous: { question: string; answer: string }[] }, onThinking?: Thinking): Promise<AnswerResult> {
     const out = await this.chat(
       `${ANSWER_SYSTEM}\n${LEVEL_STYLE[level]}`,
       {
@@ -235,6 +290,7 @@ export class VibeGemma {
       },
       AnswerOut,
       500,
+      onThinking,
     );
     if (out) return { answer: out.value.answer, source: out.source };
     return { answer: `Gemma isn't available right now (${this.lastFailure ?? "no model"}), so this question can't be answered. Start Ollama and ask again.`, source: this.template() };
@@ -254,6 +310,7 @@ export class VibeGemma {
         nextSteps: ["Check the agent output for errors or permission denials, refine the prompt, and run again."],
         citations: [],
         invalidCitations: [],
+        criteriaStatus: (input.criteria ?? []).map((text) => ({ text, met: false, why: "No changes were made" })),
         omissions,
         source: { provider: "template", mode: "template", detail: "no changes to analyze" },
       };
@@ -269,10 +326,13 @@ export class VibeGemma {
         diffs: boundDiffs(input.context, 24_000),
         evidence,
         omissions,
+        criteria: (input.criteria ?? []).map((text, index) => ({ index, text })),
       },
       ReportOut,
+      1200,
+      input.onThinking,
     );
-    if (!out) return { ...templateReport(input, files), omissions, source: this.template() };
+    if (!out) return { ...templateReport(input, files), criteriaStatus: (input.criteria ?? []).map((text) => ({ text, met: false, why: "Not checked (Gemma unavailable)" })), omissions, source: this.template() };
 
     const known = new Set(files.map((f) => f.path));
     const ok = (c: { path: string; startLine: number; endLine: number }) =>
@@ -286,7 +346,10 @@ export class VibeGemma {
       risks: out.value.risks,
       tradeoffs: out.value.tradeoffs,
       nextSteps: out.value.nextSteps,
-      ...(out.value.learningQuestion ? { learningQuestion: out.value.learningQuestion } : {}),
+      criteriaStatus: (input.criteria ?? []).map((text, i) => {
+        const c = out.value.criteria.find((x) => x.index === i);
+        return { text, met: c?.met ?? false, why: c?.why ?? "" };
+      }),
       citations: out.value.citations.filter(ok),
       invalidCitations: [
         ...out.value.citations.filter((c) => !ok(c)),
@@ -297,6 +360,17 @@ export class VibeGemma {
       source: out.source,
     };
   }
+}
+
+/** Readable text from a partial JSON reply: the string values written so far, one per line. */
+export function jsonPreview(partial: string): string {
+  const out: string[] = [];
+  for (const m of partial.matchAll(/"(\w+)"\s*:\s*"((?:[^"\\]|\\.)*)/g)) {
+    if (/^(id|path|changeBatchId|index)$/.test(m[1]!)) continue;
+    const v = m[2]!.replace(/\\n/g, " ").replace(/\\"/g, '"').trim();
+    if (v) out.push(v);
+  }
+  return out.join("\n");
 }
 
 /** Zod -> JSON schema for Ollama structured output; plain "json" mode if conversion is unsupported. */
@@ -350,7 +424,7 @@ export function templateRefine(prompt: string, qa: { question: string; answer: s
   };
 }
 
-function templateReport(input: ReportInput, files: VibeReport["changes"]): Omit<ReportBody, "source" | "omissions"> {
+function templateReport(input: ReportInput, files: VibeReport["changes"]): Omit<ReportBody, "source" | "omissions" | "criteriaStatus"> {
   const created = files.filter((f) => f.kind === "create").length;
   const modified = files.filter((f) => f.kind === "modify").length;
   const deleted = files.filter((f) => f.kind === "delete").length;
@@ -419,7 +493,7 @@ export function reportMarkdown(
   list("Risks", r.risks);
   list("Tradeoffs", r.tradeoffs);
   list("Next steps", r.nextSteps);
-  if (r.learningQuestion) L.push("## Learning question", "", `**Q:** ${r.learningQuestion.question}`, "", `<details><summary>Answer</summary>\n\n${r.learningQuestion.answer}\n\n</details>`, "");
+  if (r.criteriaStatus?.length) L.push("## Done when", "", ...r.criteriaStatus.map((c) => `- [${c.met ? "x" : " "}] ${c.text}${c.why ? ` — ${c.why}` : ""}`), "");
   L.push("## Verification (commands you ran after the agent finished)", "");
   if (!runs.length) L.push("_No tests were run. The changes above are unverified._", "");
   for (const v of runs) L.push(`- \`${v.command}\` → **${v.result.toUpperCase()}**${v.exitCode !== null ? ` (exit ${v.exitCode})` : ""}, ${Math.round((v.durationMs ?? 0) / 100) / 10}s, ${v.finishedAt ?? v.startedAt}`);

@@ -1,5 +1,5 @@
 // Drives a vibe session: clarify -> (answers) -> refine -> run coding agent -> collect observed diffs -> report.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { newId } from "../shared/events.js";
 import type { ClientEnvelope, ServerMessage } from "../shared/events.js";
@@ -42,22 +42,31 @@ type VibeMessage = Extract<ClientEnvelope, { type: `vibe_${string}` }>;
 
 export class VibeController {
   agents: CodingAgentInfo[] = [];
-  private running: { vibeId: string; handle: AgentRunHandle } | null = null;
-  /** vibeId collecting change batches (during the run and until the observer settles). */
-  private collecting: string | null = null;
-  private lastBatchAt = 0;
+  /** Several changes can run at once (one agent each). */
+  private running = new Map<string, AgentRunHandle>();
+  /** Sessions collecting observed change batches (while running and until the observer settles). */
+  private collecting = new Map<string, { lastBatchAt: number; touched: Set<string>; lastEventAt: number }>();
 
   constructor(private deps: VibeDeps) {
   }
 
-  async init(): Promise<void> {
+  /** Resolves once coding agents have been detected (runs wait for it). */
+  private detected: Promise<void> | null = null;
+
+  init(): Promise<void> {
+    this.detected ??= this.detect();
+    return this.detected;
+  }
+
+  private async detect(): Promise<void> {
     this.agents = await detectAgents(this.deps.env);
     this.deps.broadcast({ type: "coding_agents", payload: this.agents });
     this.deps.log(`coding agents: ${this.agents.map((a) => `${a.id}=${a.available ? a.version : "missing"}`).join(", ")}`);
   }
 
+  /** True while any agent is running (blocks switching workspace, not starting more changes). */
   isBusy(): boolean {
-    return this.running !== null || this.collecting !== null;
+    return this.running.size > 0 || this.collecting.size > 0;
   }
 
   current(): VibeSession | null {
@@ -84,16 +93,29 @@ export class VibeController {
   }
 
   stop(): void {
-    this.running?.handle.cancel();
+    for (const h of this.running.values()) h.cancel();
   }
 
+  /**
+   * Attribute an observed batch to the run that made it. With several agents at once, the batch goes to the
+   * session whose agent touched the most of its files; otherwise to the most recently active running session.
+   */
   onBatch(batch: ChangeBatch): void {
-    if (!this.collecting) return;
-    const s = this.find(this.collecting);
-    if (!s || s.changeBatchIds.includes(batch.id)) return;
-    this.lastBatchAt = Date.now();
-    this.update(s.id, { changeBatchIds: [...s.changeBatchIds, batch.id] });
-    if (s.taskId) this.deps.linkBatch?.(batch.id, s.taskId);
+    if (this.collecting.size === 0) return;
+    const paths = batch.changes.map((c) => c.path);
+    // A debounced batch can mix several agents' edits: give it to every change that touched one of its files.
+    let targets = [...this.collecting].filter(([, c]) => paths.some((p) => c.touched.has(p))).map(([id]) => id);
+    if (targets.length === 0) {
+      const latest = [...this.collecting].sort((a, b) => b[1].lastEventAt - a[1].lastEventAt)[0];
+      targets = latest ? [latest[0]] : [];
+    }
+    for (const id of targets) {
+      const s = this.find(id);
+      if (!s || s.changeBatchIds.includes(batch.id)) continue;
+      this.collecting.get(id)!.lastBatchAt = Date.now();
+      this.update(id, { changeBatchIds: [...s.changeBatchIds, batch.id] });
+      if (s.taskId && targets.length === 1) this.deps.linkBatch?.(batch.id, s.taskId);
+    }
   }
 
   async handle(env: VibeMessage): Promise<void> {
@@ -116,14 +138,12 @@ export class VibeController {
       case "vibe_verify":
         return this.verify(env.payload.vibeId, env.payload.command);
       case "vibe_reset": {
-        if (this.isBusy()) throw new Error("a coding agent run is in progress; cancel it first");
         const ws = this.requireWs();
         ws.currentVibeId = null;
         this.deps.persist();
         return;
       }
       case "vibe_open": {
-        if (this.isBusy()) throw new Error("a coding agent run is in progress; cancel it first");
         const ws = this.requireWs();
         if (!ws.vibeSessions.some((s) => s.id === env.payload.vibeId)) throw new Error("session not found");
         ws.currentVibeId = env.payload.vibeId;
@@ -136,7 +156,6 @@ export class VibeController {
   // ---------- phases ----------
 
   private async start(prompt: string, agent: CodingAgentId, review: boolean, allowCommands: boolean, level: VibeSession["level"]): Promise<void> {
-    if (this.isBusy()) throw new Error("a coding agent run is in progress; cancel it first");
     const ws = this.requireWs();
     const at = this.iso();
     const s: VibeSession = {
@@ -149,6 +168,7 @@ export class VibeController {
       review,
       allowCommands,
       level,
+      criteria: [],
       qa: [],
       questions: [],
       clarifyRounds: 0,
@@ -156,6 +176,8 @@ export class VibeController {
       assumptions: [],
       events: [],
       changeBatchIds: [],
+      touched: [],
+      parallel: false,
       verificationRunIds: [],
       ...(detectTestCommand(ws.project.rootPath) ? { suggestedCheck: detectTestCommand(ws.project.rootPath) } : {}),
     };
@@ -165,7 +187,7 @@ export class VibeController {
     this.emit(s);
 
     const summary = workspaceSummary(ws.project.rootPath);
-    const c = await this.deps.gemma().clarify(s.originalPrompt, summary, [], s.level);
+    const c = await this.deps.gemma().clarify(s.originalPrompt, summary, [], s.level, this.thinker(s.id));
     if (!this.isPhase(s.id, "clarifying")) return; // cancelled / replaced meanwhile
     if (c.vague) {
       this.update(s.id, { phase: "awaiting_answers", vague: true, vaguenessReason: c.reason, questions: c.questions, clarifyRounds: 1, gemma: c.source });
@@ -185,7 +207,7 @@ export class VibeController {
     if (s.clarifyRounds >= (s.level === "beginner" ? 1 : 2)) return this.refine(vibeId, merged);
     this.update(vibeId, { phase: "clarifying", answers: merged });
     const prior = s.questions.map((q) => ({ question: q.question, answer: merged[q.id] ?? "" })).filter((x) => x.answer.trim());
-    const c = await this.deps.gemma().clarify(s.originalPrompt, workspaceSummary(this.requireWs().project.rootPath), prior, s.level);
+    const c = await this.deps.gemma().clarify(s.originalPrompt, workspaceSummary(this.requireWs().project.rootPath), prior, s.level, this.thinker(vibeId));
     if (!this.isPhase(vibeId, "clarifying")) return;
     if (c.vague && c.questions.length) {
       this.update(vibeId, { phase: "awaiting_answers", vaguenessReason: c.reason, questions: [...s.questions, ...c.questions], clarifyRounds: s.clarifyRounds + 1, gemma: c.source });
@@ -200,13 +222,18 @@ export class VibeController {
     if (s.phase !== from && !(from === "awaiting_answers" && s.phase === "ready")) throw new Error(`cannot refine in phase ${s.phase}`);
     this.update(vibeId, { phase: "refining", answers });
     const qa = s.questions.map((q) => ({ question: q.question, answer: answers[q.id] ?? "" }));
-    const r = await this.deps.gemma().refine(s.originalPrompt, qa, workspaceSummary(this.requireWs().project.rootPath), s.level);
+    // Parallel agents: tell Gemma what the others are doing so it keeps this agent out of their way.
+    const otherWork = [...this.collecting.entries()]
+      .filter(([id]) => id !== vibeId)
+      .map(([id, c]) => ({ request: this.find(id)?.originalPrompt.slice(0, 300) ?? "", files: [...c.touched].slice(0, 40) }));
+    const r = await this.deps.gemma().refine(s.originalPrompt, qa, workspaceSummary(this.requireWs().project.rootPath), s.level, this.thinker(vibeId), otherWork);
     if (!this.isPhase(vibeId, "refining")) return;
-    this.update(vibeId, { phase: "ready", refinedPrompt: r.refinedPrompt, assumptions: r.assumptions, gemma: r.source });
+    this.update(vibeId, { phase: "ready", refinedPrompt: r.refinedPrompt, assumptions: r.assumptions, criteria: r.acceptanceCriteria, gemma: r.source });
     this.ensureTask(vibeId, r.title, r.acceptanceCriteria);
     const cur = this.find(vibeId)!;
     // Like code-guide: once Gemma has no more questions, hand the refined prompt straight to the agent.
     if (!cur.review) {
+      await this.init(); // agent detection may still be running right after startup
       const info = this.agents.find((a) => a.id === cur.agent);
       if (info?.available) await this.run(vibeId, r.refinedPrompt, cur.agent, cur.allowCommands);
       else this.update(vibeId, { error: `${info?.name ?? cur.agent} is not available: ${info?.detail ?? "not detected"}. Review the prompt and pick another agent.` });
@@ -226,10 +253,11 @@ export class VibeController {
   }
 
   private async run(vibeId: string, prompt: string, agent: CodingAgentId, allowCommands: boolean): Promise<void> {
-    if (this.isBusy()) throw new Error("a coding agent run is already in progress");
     const s = this.find(vibeId);
+    if (this.running.has(vibeId)) throw new Error("this change is already running");
     if (!s) throw new Error(`vibe session ${vibeId} not found`);
     if (!["ready", "done", "failed", "cancelled"].includes(s.phase)) throw new Error(`cannot run in phase ${s.phase}`);
+    await this.init();
     const info = this.agents.find((a) => a.id === agent);
     if (!info?.available) throw new Error(`${info?.name ?? agent} is not available: ${info?.detail ?? "not detected"}`);
     const ws = this.requireWs();
@@ -243,12 +271,16 @@ export class VibeController {
       events: [],
       changeBatchIds: [],
       verificationRunIds: [],
+      touched: [],
+      parallel: false,
       report: undefined,
       error: undefined,
       run: { agent, command: desc.display({ allowCommands }), allowCommands, startedAt, outcome: "running" },
     });
-    this.collecting = vibeId;
-    this.lastBatchAt = Date.now();
+    const parallel = this.collecting.size > 0;
+    for (const id of this.collecting.keys()) this.update(id, { parallel: true });
+    this.collecting.set(vibeId, { lastBatchAt: Date.now(), touched: new Set(), lastEventAt: Date.now() });
+    if (parallel) this.update(vibeId, { parallel: true });
     const handle = runAgent({
       agent,
       allowCommands,
@@ -258,10 +290,10 @@ export class VibeController {
       env: this.deps.env,
       onEvent: (e) => this.pushEvent(vibeId, e),
     });
-    this.running = { vibeId, handle };
+    this.running.set(vibeId, handle);
     // Finish asynchronously so the WS handler returns immediately.
     void handle.done.then(async (res) => {
-      this.running = null;
+      this.running.delete(vibeId);
       const cur = this.find(vibeId);
       if (cur?.run) {
         this.update(vibeId, {
@@ -269,8 +301,8 @@ export class VibeController {
           phase: "reporting",
         });
       }
-      await this.settle();
-      this.collecting = null;
+      await this.settle(vibeId);
+      this.collecting.delete(vibeId);
       await this.report(vibeId);
     });
   }
@@ -278,8 +310,9 @@ export class VibeController {
   private async cancel(vibeId: string): Promise<void> {
     const s = this.find(vibeId);
     if (!s) return;
-    if (this.running?.vibeId === vibeId) {
-      this.running.handle.cancel(); // run() continues to settle + report on what changed so far
+    const h = this.running.get(vibeId);
+    if (h) {
+      h.cancel(); // run() continues to settle + report on what changed so far
       return;
     }
     if (["clarifying", "awaiting_answers", "refining", "ready"].includes(s.phase)) this.update(vibeId, { phase: "cancelled" });
@@ -288,14 +321,26 @@ export class VibeController {
   private async report(vibeId: string): Promise<void> {
     const s = this.find(vibeId);
     if (!s?.run) throw new Error("nothing to report yet; run the agent first");
-    if (this.running?.vibeId === vibeId) throw new Error("the agent is still running");
+    if (this.running.has(vibeId)) throw new Error("the agent is still running");
     this.update(vibeId, { phase: "reporting" });
     try {
-      const context = await this.deps.observer.getContext(s.changeBatchIds, { maxChars: 40_000 });
+      let context = await this.deps.observer.getContext(s.changeBatchIds, { maxChars: 40_000 });
+      // Ran alongside another change: only report the files this change's agent edited.
+      if (s.parallel && s.touched.length) {
+        const mine = new Set(s.touched);
+        context = {
+          ...context,
+          diffs: context.diffs.filter((d) => mine.has(d.path)),
+          evidence: context.evidence.filter((e) => mine.has(e.path)),
+          excerpts: context.excerpts.filter((x) => mine.has(x.path)),
+        };
+      }
       const agentName = AGENTS[s.run.agent].name;
       const cur = this.find(vibeId)!;
       const input = {
         level: cur.level,
+        criteria: cur.criteria,
+        onThinking: this.thinker(vibeId),
         originalPrompt: s.originalPrompt,
         refinedPrompt: s.refinedPrompt ?? s.originalPrompt,
         agentName,
@@ -324,7 +369,7 @@ export class VibeController {
     let answer: string;
     try {
       const context = await this.deps.observer.retrieveForQuestion(question, s.changeBatchIds, { maxChars: 30_000 });
-      answer = (await this.deps.gemma().answer(question, s.level, { originalPrompt: s.originalPrompt, reportSummary: s.report?.summary, context, previous })).answer;
+      answer = (await this.deps.gemma().answer(question, s.level, { originalPrompt: s.originalPrompt, reportSummary: s.report?.summary, context, previous }, this.thinker(vibeId))).answer;
     } catch (e) {
       answer = `Couldn't answer that: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -336,7 +381,7 @@ export class VibeController {
   private async verify(vibeId: string, command: string): Promise<void> {
     const s = this.find(vibeId);
     if (!s?.report) throw new Error("run the agent and get a report before verifying");
-    if (this.isBusy()) throw new Error("the agent is still running");
+    if (this.running.has(vibeId)) throw new Error("the agent is still running");
     if (!this.deps.verify) throw new Error("verification is not available");
     const run = await this.deps.verify(command.trim());
     const cur = this.find(vibeId)!;
@@ -357,20 +402,56 @@ export class VibeController {
   }
 
   /** Wait until the observer has been quiet for settleQuietMs (it debounces bursts), bounded by settleMaxMs. */
-  private async settle(): Promise<void> {
+  private async settle(vibeId: string): Promise<void> {
     const quiet = this.deps.settleQuietMs ?? 4000;
     const max = this.deps.settleMaxMs ?? 20_000;
     const start = Date.now();
-    this.lastBatchAt = Math.max(this.lastBatchAt, Date.now());
-    while (Date.now() - start < max && Date.now() - this.lastBatchAt < quiet) await new Promise((r) => setTimeout(r, 250));
+    const c = this.collecting.get(vibeId);
+    if (!c) return;
+    c.lastBatchAt = Math.max(c.lastBatchAt, Date.now());
+    while (Date.now() - start < max && Date.now() - c.lastBatchAt < quiet) await new Promise((r) => setTimeout(r, 250));
   }
 
   // ---------- state helpers ----------
+
+  /** Streams Gemma's reasoning for a session to the UI (throttled). */
+  private thinker(vibeId: string): (text: string) => void {
+    let last = 0;
+    return (text) => {
+      const now = Date.now();
+      if (now - last < 250) return;
+      last = now;
+      this.deps.broadcast({ type: "vibe_thinking", payload: { vibeId, text: text.slice(-4000) } });
+    };
+  }
 
   private pushEvent(vibeId: string, e: VibeAgentEvent): void {
     const s = this.find(vibeId);
     if (!s) return;
     s.events = [...s.events, e].slice(-MAX_EVENTS);
+    // Remember which files this agent touched (for attributing batches when several agents run).
+    const c = this.collecting.get(vibeId);
+    if (c) {
+      c.lastEventAt = Date.now();
+      const root = this.deps.workspace()?.project.rootPath;
+      const m = /^(?:Edit|MultiEdit|Write|NotebookEdit|Delete) (.+)$/.exec(e.text);
+      if (e.kind === "tool" && m && root) {
+        const abs = m[1]!.trim();
+        // Agents report resolved paths (e.g. /private/var/... on macOS for /var/...): match either form.
+        let real = root;
+        try {
+          real = realpathSync(root);
+        } catch {
+          /* keep root */
+        }
+        const base = [root, real].find((r) => abs === r || abs.startsWith(r + "/") || abs.startsWith(r + "\\"));
+        const rel = base ? abs.slice(base.length).replace(/^[\\/]+/, "").split(/[\\/]/).join("/") : abs;
+        if (!c.touched.has(rel)) {
+          c.touched.add(rel);
+          s.touched = [...s.touched, rel];
+        }
+      }
+    }
     this.deps.broadcast({ type: "vibe_agent_event", payload: { vibeId, event: e } });
     this.deps.persist();
   }
@@ -380,7 +461,7 @@ export class VibeController {
   }
 
   private isPhase(id: string, phase: VibeSession["phase"]): boolean {
-    return this.find(id)?.phase === phase && this.deps.workspace()?.currentVibeId === id;
+    return this.find(id)?.phase === phase;
   }
 
   private update(id: string, patch: Partial<VibeSession>): void {

@@ -4,7 +4,6 @@ import {
   BUSY_PHASES,
   LEVEL_LABEL,
   LEVELS,
-  bar,
   basename,
   changeTitle,
   currentActivity,
@@ -12,7 +11,6 @@ import {
   phaseIcon,
   phaseWords,
   steps,
-  taskProgress,
   timeAgo,
   truncate,
 } from "./format.js";
@@ -52,7 +50,7 @@ export function AskPane(props: {
   question: ClarifyQuestion | null;
   questionNumber: number;
   questionCount: number;
-  queued: string | null;
+  thinking?: string;
 }) {
   const { vibe, question } = props;
   if (vibe && (vibe.phase === "clarifying" || vibe.phase === "refining")) {
@@ -63,6 +61,7 @@ export function AskPane(props: {
           <Spinner />
           <Text>{vibe.phase === "clarifying" ? (vibe.clarifyRounds > 0 ? "Checking your answers…" : "Gemma is reading your request…") : "Writing clear instructions for Claude…"}</Text>
         </Box>
+        <ThinkingView text={props.thinking} />
       </Box>
     );
   }
@@ -88,6 +87,7 @@ export function AskPane(props: {
   const busy = !!vibe && BUSY_PHASES.includes(vibe.phase);
   return (
     <Box flexDirection="column" gap={1}>
+      {vibe?.error && vibe.phase !== "running" && <Text color="red" wrap="wrap">{vibe.error}</Text>}
       {!vibe ? (
         <Box flexDirection="column">
           <Text bold>What would you like to change?</Text>
@@ -96,10 +96,9 @@ export function AskPane(props: {
       ) : (
         <Box flexDirection="column">
           <Request vibe={vibe} />
-          <Text dimColor>{busy ? "Claude is still on this one. Anything you type now starts right after." : "Want something else? Describe the next change."}</Text>
+          <Text dimColor>{busy ? "This change is still going. Type another request to run it at the same time." : "Want something else? Describe the next change."}</Text>
         </Box>
       )}
-      {props.queued && <Text color="yellow">Next up: “{truncate(props.queued, 70)}”</Text>}
     </Box>
   );
 }
@@ -118,7 +117,7 @@ function Request({ vibe }: { vibe: VibeSession }) {
 export function ProgressPane({ vibe, task, changeBatches, runs, now }: { vibe: VibeSession | null; task?: Task; changeBatches: ChangeBatch[]; runs: VerificationRun[]; now: number }) {
   if (!vibe) return <Empty text="Nothing is happening yet. Describe a change in Ask." />;
   const files = filesFor(vibe, changeBatches);
-  const prog = taskProgress(task);
+  void task;
   const lastRun = runs.filter((r) => vibe.verificationRunIds.includes(r.id)).at(-1);
   return (
     <Box flexDirection="column" gap={1}>
@@ -148,19 +147,25 @@ export function ProgressPane({ vibe, task, changeBatches, runs, now }: { vibe: V
           {files.length > 8 && <Text dimColor>{`  and ${files.length - 8} more`}</Text>}
         </Box>
       )}
-      {prog && prog.total > 0 && (
+      {vibe.criteria.length > 0 && (
         <Box flexDirection="column">
-          <Text>
-            <Text bold>Done when </Text>
-            <Text color="green">{bar(prog.met, prog.total, 12)}</Text>
-            <Text dimColor>{` ${prog.met} of ${prog.total} checks`}</Text>
-          </Text>
-          {task!.acceptanceCriteria.map((c) => (
-            <Text key={c.id} color={c.met ? "green" : "gray"} wrap="truncate-end">{`  ${c.met ? "✔" : "○"} ${c.text}`}</Text>
-          ))}
+          <Text bold>Done when</Text>
+          {vibe.criteria.map((c, i) => {
+            const st = vibe.report?.criteriaStatus[i];
+            const state = st ? (st.met ? "met" : "not") : vibe.phase === "running" || vibe.phase === "reporting" ? "pending" : "unknown";
+            return (
+              <Text key={c} wrap="wrap" color={state === "met" ? "green" : state === "not" ? "yellow" : "gray"}>
+                {`  ${state === "met" ? "✔" : state === "not" ? "✖" : "○"} ${c}`}
+                {st?.why ? <Text dimColor>{` — ${st.why}`}</Text> : null}
+              </Text>
+            );
+          })}
+          {vibe.suggestedCheck && (
+            <Text color={!lastRun ? "gray" : lastRun.result === "pass" ? "green" : "red"}>{`  ${!lastRun ? "○" : lastRun.result === "pass" ? "✔" : "✖"} Tests pass (${vibe.suggestedCheck})`}</Text>
+          )}
+          {vibe.report && <Text dimColor>✔/✖ checked by Gemma against the actual changes.</Text>}
         </Box>
       )}
-      {lastRun && <Text color={lastRun.result === "pass" ? "green" : "red"}>{lastRun.result === "pass" ? "✔ Your tests pass" : `✖ Your tests failed (${lastRun.command})`}</Text>}
       {vibe.phase === "done" && vibe.suggestedCheck && <Text dimColor>{`Press T to check that everything still works (runs ${vibe.suggestedCheck}).`}</Text>}
       {vibe.phase === "failed" && vibe.error && <Text color="red" wrap="wrap">{vibe.error}</Text>}
     </Box>
@@ -177,7 +182,7 @@ export function filesFor(vibe: VibeSession, batches: ChangeBatch[]): [string, st
 
 // ---------- Learn ----------
 
-export function LearnPane({ vibe, level, revealQuiz }: { vibe: VibeSession | null; level: Level; revealQuiz: boolean }) {
+export function LearnPane({ vibe, level, thinking }: { vibe: VibeSession | null; level: Level; thinking?: string }) {
   if (!vibe) return <Empty text="After Claude makes a change, you'll see a simple explanation of it here." />;
   const levelBar = (
     <Box gap={1}>
@@ -192,7 +197,10 @@ export function LearnPane({ vibe, level, revealQuiz }: { vibe: VibeSession | nul
       <Box flexDirection="column" gap={1}>
         {levelBar}
         {vibe.phase === "reporting" ? (
-          <Box gap={1}><Spinner /><Text>Writing an explanation of the changes…</Text></Box>
+          <Box flexDirection="column">
+            <Box gap={1}><Spinner /><Text>Writing an explanation of the changes…</Text></Box>
+            <ThinkingView text={thinking} />
+          </Box>
         ) : (
           <Text dimColor>The explanation appears here once Claude has finished.</Text>
         )}
@@ -207,6 +215,7 @@ export function LearnPane({ vibe, level, revealQuiz }: { vibe: VibeSession | nul
     <Box flexDirection="column" gap={1}>
       {levelBar}
       {rewriting && <Box gap={1}><Spinner /><Text>{`Rewriting for “${LEVEL_LABEL[level]}”…`}</Text></Box>}
+      {(rewriting || vibe.qa.some((x) => x.pending)) && <ThinkingView text={thinking} />}
       {r.source.mode !== "real" && <Text color="yellow">Gemma wasn't available, so this is a basic summary. Start Ollama for a real explanation.</Text>}
       <Box flexDirection="column">
         <Text bold color="cyan">What happened</Text>
@@ -230,19 +239,24 @@ export function LearnPane({ vibe, level, revealQuiz }: { vibe: VibeSession | nul
           {notes.map((n) => <Text key={n} wrap="wrap">{`• ${n}`}</Text>)}
         </Box>
       )}
-      {r.learningQuestion && (
-        <Box flexDirection="column">
-          <Text bold color="magenta">Quick quiz</Text>
-          <Text wrap="wrap">{r.learningQuestion.question}</Text>
-          {revealQuiz ? <Text color="green" wrap="wrap">{r.learningQuestion.answer}</Text> : <Text dimColor>Think about it, then press Enter to see the answer.</Text>}
-        </Box>
-      )}
       {vibe.qa.slice(-3).map((x) => (
         <Box key={x.at + x.question} flexDirection="column">
           <Text color="cyan" wrap="wrap">{`You: ${x.question}`}</Text>
           {x.pending ? <Box gap={1}><Spinner /><Text dimColor>Gemma is looking at the changes…</Text></Box> : <Text wrap="wrap">{x.answer}</Text>}
         </Box>
       ))}
+    </Box>
+  );
+}
+
+/** Gemma's live reasoning (last few lines), shown while it works. */
+export function ThinkingView({ text }: { text?: string }) {
+  if (!text?.trim()) return null;
+  const lines = text.trim().split(/\n+/).slice(-4).map((l) => truncate(l, 200));
+  return (
+    <Box flexDirection="column" borderStyle="single" borderColor="gray" borderTop={false} borderRight={false} borderBottom={false} paddingLeft={1}>
+      <Text dimColor italic>Gemma is thinking…</Text>
+      {lines.map((l, i) => <Text key={i} dimColor wrap="wrap">{l}</Text>)}
     </Box>
   );
 }
