@@ -9,6 +9,7 @@ import { EngineClient } from "../shared/wsClient.js";
 import { App } from "./App.js";
 import { applyConfigEnv, loadConfig } from "./config.js";
 import { Setup } from "./Setup.js";
+import { Toaster, ensureToastHelper } from "./toaster.js";
 
 const args = process.argv.slice(2);
 const folder = resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
@@ -46,10 +47,22 @@ void engine.orchestrator.warmUpGemma(); // local Ollama: load the model now so t
 const client = new EngineClient({ port: engine.bridge.port, token: engine.bridge.token }, { WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket });
 client.connect();
 
+// `skck --prog`: also show progress as macOS toasts in the top-right corner.
+let toaster: Toaster | null = null;
+if (args.includes("--prog")) {
+  const helper = ensureToastHelper();
+  if ("bin" in helper) {
+    toaster = new Toaster(helper.bin);
+    client.onAny((e) => toaster?.onEvent(e));
+    toaster.show("Sidekick is watching your changes", "sparkles", 2.5);
+  } else process.stderr.write(`${helper.error}\n`);
+}
+
 let stopping = false;
 const shutdown = async () => {
   if (stopping) return;
   stopping = true;
+  toaster?.close();
   client.close();
   await engine.stop();
 };

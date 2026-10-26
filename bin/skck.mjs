@@ -3,6 +3,7 @@
 //   skck                 # terminal app on the folder you're in
 //   skck ~/code/my-app   # on another folder
 //   skck --setup         # choose skill level, models, permissions
+//   skck --prog          # also show progress as macOS toasts (top-right)
 //   skck --window        # the floating desktop window (Tauri; source checkout only)
 // Installed package: runs the prebuilt bundle (dist-cli/skck.mjs, made by `npm run build:cli` / on pack).
 // Source checkout (`npm link`): always runs the live TypeScript through tsx (LCC_FROM_BUNDLE=1 to test the bundle).
