@@ -5,7 +5,8 @@ import type { ClientMessage, CodingAgentId, Level, ServerEnvelope, VibePhase } f
 import type { ConnectionState } from "../shared/wsClient.js";
 import { applyEngineEvent, initialUiState } from "../ui/src/lib/state.js";
 import { BUSY_PHASES, LEVELS, LEVEL_LABEL, PANES, PANE_LABEL, autoPane, basename, friendlyError, paneForPhase, type Pane } from "./format.js";
-import { AskPane, ChangesList, LearnPane, ProgressPane } from "./panes.js";
+import { AskPane, ChangesList, LearnPane, ProgressPane, SeeItPane } from "./panes.js";
+import { copyText, openExternal } from "./os.js";
 import { ScrollArea, ScrollHint } from "./ScrollArea.js";
 import { TextBox } from "./TextBox.js";
 
@@ -80,6 +81,9 @@ export function App({ client, agent = "claude", autoPermissions = true, onQuit }
     return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }, [ui.sessions, ui.vibeHistory, sessionStart]);
   const runningCount = history.filter((h) => h.phase === "running").length;
+  // Other changes running alongside the one being viewed (for the "keeping them apart" messages).
+  const othersRunning = history.filter((h) => h.id !== vibe?.id && (h.phase === "running" || h.phase === "refining")).length;
+  const launch = ui.launch;
   const thinking = vibe ? ui.thinking[vibe.id] ?? "" : "";
 
   // Follow the work: switch panes on meaningful phase transitions of the current change.
@@ -156,6 +160,28 @@ export function App({ client, agent = "claude", autoPermissions = true, onQuit }
       return exit();
     }
     if (key.ctrl && input === "n") return openChange(0);
+    if (key.ctrl && input === "o") {
+      setPane("see");
+      if (!launch || ["failed", "stopped", "done"].includes(launch.phase)) send({ type: "launch_plan", payload: {} });
+      return;
+    }
+    if (pane === "see") {
+      const target = launch?.url ?? launch?.file;
+      if (key.return) {
+        if (!launch || ["failed", "stopped", "done"].includes(launch.phase)) return send({ type: "launch_plan", payload: {} });
+        if (launch.phase === "confirm") return send({ type: "launch_confirm", payload: {} });
+        if (target) void openExternal(target).then((ok) => setToast(ok ? "Opened." : "Couldn't open it automatically. Press C to copy instead."));
+        return;
+      }
+      if (key.escape) {
+        if (launch?.phase === "confirm" || launch?.phase === "starting" || launch?.phase === "running") send({ type: "launch_stop", payload: {} });
+        return;
+      }
+      if ((input === "b" || input === "B") && target) return void openExternal(target).then((ok) => setToast(ok ? "Opened in your browser." : "Couldn't open it automatically. Press C to copy instead."));
+      if ((input === "c" || input === "C") && target) return void copyText(target).then((ok) => setToast(ok ? `Copied: ${target}` : "Couldn't copy on this system."));
+      if ((input === "s" || input === "S") && launch?.phase === "running") return send({ type: "launch_stop", payload: {} });
+      if (input === "r" || input === "R") return send({ type: "launch_plan", payload: {} });
+    }
     if (key.tab) {
       const i = PANES.indexOf(pane);
       setScroll(0);
@@ -237,8 +263,9 @@ export function App({ client, agent = "claude", autoPermissions = true, onQuit }
             {!wide && history.length > 0 && <Text dimColor>{`· change ${Math.max(1, selected)} of ${history.length}`}</Text>}
           </Box>
           <ScrollArea height={areaH} scroll={scroll} onContentHeight={setContentH}>
-            {pane === "ask" && <AskPane vibe={vibe} question={question} questionNumber={qIndex + 1} questionCount={pendingQs.length} thinking={thinking} />}
-            {pane === "progress" && <ProgressPane vibe={vibe} task={task} changeBatches={ui.changeBatches} runs={ui.verificationRuns} now={now} />}
+            {pane === "ask" && <AskPane vibe={vibe} question={question} questionNumber={qIndex + 1} questionCount={pendingQs.length} thinking={thinking} othersRunning={othersRunning} />}
+            {pane === "progress" && <ProgressPane vibe={vibe} task={task} changeBatches={ui.changeBatches} runs={ui.verificationRuns} now={now} othersRunning={othersRunning} />}
+            {pane === "see" && <SeeItPane launch={launch} />}
             {pane === "learn" && <LearnPane vibe={vibe} level={level} thinking={thinking} />}
           </ScrollArea>
           <ScrollHint above={scroll > 0} below={contentH - scroll > areaH} />
@@ -260,7 +287,8 @@ export function App({ client, agent = "claude", autoPermissions = true, onQuit }
 }
 
 function hints(pane: Pane, phase: VibePhase | undefined, busy: boolean): string {
-  const nav = "Ctrl+N new change · Tab switch view · ↑↓ changes · Ctrl+C quit";
+  const nav = "Ctrl+N new change · Ctrl+O see it · Tab switch view · ↑↓ changes · Ctrl+C quit";
+  if (pane === "see") return `Enter run/open · B browser · C copy · S stop · R rethink · Tab switch view · Ctrl+C quit`;
   if (phase === "running") return `Esc stop this change · ${nav}`;
   if (pane === "ask") return phase === "awaiting_answers" ? `Enter answer · Esc cancel · ${nav}` : busy ? `Enter start another change · Esc cancel this one · ${nav}` : `Enter send · ${nav}`;
   if (pane === "learn") return `1-3 explanation level · Enter ask a question · ${nav}`;

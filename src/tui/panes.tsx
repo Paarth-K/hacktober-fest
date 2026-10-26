@@ -1,5 +1,5 @@
 import { Box, Text } from "ink";
-import type { ChangeBatch, ClarifyQuestion, Level, Task, VerificationRun, VibeHistoryItem, VibeSession } from "../shared/index.js";
+import type { ChangeBatch, ClarifyQuestion, LaunchState, Level, Task, VerificationRun, VibeHistoryItem, VibeSession } from "../shared/index.js";
 import {
   BUSY_PHASES,
   LEVEL_LABEL,
@@ -51,6 +51,7 @@ export function AskPane(props: {
   questionNumber: number;
   questionCount: number;
   thinking?: string;
+  othersRunning?: number;
 }) {
   const { vibe, question } = props;
   if (vibe && (vibe.phase === "clarifying" || vibe.phase === "refining")) {
@@ -59,7 +60,15 @@ export function AskPane(props: {
         <Request vibe={vibe} />
         <Box gap={1}>
           <Spinner />
-          <Text>{vibe.phase === "clarifying" ? (vibe.clarifyRounds > 0 ? "Checking your answers…" : "Gemma is reading your request…") : "Writing clear instructions for Claude…"}</Text>
+          <Text>
+            {vibe.phase === "clarifying"
+              ? vibe.clarifyRounds > 0
+                ? "Checking your answers…"
+                : "Gemma is reading your request…"
+              : props.othersRunning
+                ? `Coordinating with ${props.othersRunning} other agent${props.othersRunning > 1 ? "s" : ""} so changes don't conflict…`
+                : "Writing clear instructions for Claude…"}
+          </Text>
         </Box>
         <ThinkingView text={props.thinking} />
       </Box>
@@ -114,7 +123,7 @@ function Request({ vibe }: { vibe: VibeSession }) {
 
 // ---------- Progress ----------
 
-export function ProgressPane({ vibe, task, changeBatches, runs, now }: { vibe: VibeSession | null; task?: Task; changeBatches: ChangeBatch[]; runs: VerificationRun[]; now: number }) {
+export function ProgressPane({ vibe, task, changeBatches, runs, now, othersRunning = 0 }: { vibe: VibeSession | null; task?: Task; changeBatches: ChangeBatch[]; runs: VerificationRun[]; now: number; othersRunning?: number }) {
   if (!vibe) return <Empty text="Nothing is happening yet. Describe a change in Ask." />;
   const files = filesFor(vibe, changeBatches);
   void task;
@@ -131,6 +140,9 @@ export function ProgressPane({ vibe, task, changeBatches, runs, now }: { vibe: V
               {s.state === "active" && vibe.phase === "running" && vibe.run && <Text dimColor>{elapsed(vibe.run.startedAt, now)}</Text>}
             </Box>
             {s.state === "active" && vibe.phase === "running" && <Text color="cyan">{`    ${currentActivity(vibe)}…`}</Text>}
+            {s.state === "active" && vibe.phase === "running" && othersRunning > 0 && (
+              <Text color="magenta">{`    ↔ Making sure this doesn't clash with your ${othersRunning} other change${othersRunning > 1 ? "s" : ""}`}</Text>
+            )}
           </Box>
         ))}
       </Box>
@@ -245,6 +257,62 @@ export function LearnPane({ vibe, level, thinking }: { vibe: VibeSession | null;
           {x.pending ? <Box gap={1}><Spinner /><Text dimColor>Gemma is looking at the changes…</Text></Box> : <Text wrap="wrap">{x.answer}</Text>}
         </Box>
       ))}
+    </Box>
+  );
+}
+
+// ---------- See it ----------
+
+export function SeeItPane({ launch, thinking }: { launch: LaunchState | null; thinking?: string }) {
+  if (!launch) {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold>See your project running</Text>
+        <Text dimColor wrap="wrap">Press Enter and Gemma will work out how to open it — a website in your browser, a file, or a script's output.</Text>
+      </Box>
+    );
+  }
+  const plan = launch.plan;
+  return (
+    <Box flexDirection="column" gap={1}>
+      {launch.phase === "planning" && (
+        <Box flexDirection="column">
+          <Box gap={1}><Spinner /><Text wrap="wrap">{launch.why || "Gemma is working out how to open your project…"}</Text></Box>
+          <ThinkingView text={thinking} />
+        </Box>
+      )}
+      {launch.phase === "confirm" && plan?.command && (
+        <Box flexDirection="column">
+          <Text wrap="wrap">{plan.why}</Text>
+          <Text bold>{"It will run this in your project:"}</Text>
+          <Text color="yellow" wrap="wrap">{`  $ ${plan.command}`}</Text>
+          <Text dimColor>{`Press Enter to run it${launch.attempts ? ` (attempt ${launch.attempts + 1} of 3)` : ""}, or Esc to cancel.`}</Text>
+        </Box>
+      )}
+      {launch.phase === "starting" && (
+        <Box flexDirection="column">
+          <Box gap={1}><Spinner /><Text>{plan?.kind === "command" ? "Running…" : "Starting it up and waiting for the address…"}</Text></Box>
+          {plan?.command && <Text dimColor>{`$ ${plan.command}`}</Text>}
+        </Box>
+      )}
+      {(launch.phase === "running" || launch.phase === "ready") && (
+        <Box flexDirection="column">
+          <Text color="green" bold>{launch.phase === "running" ? "✔ It's running" : "✔ Ready to open"}</Text>
+          {launch.url && <Text color="cyan" bold wrap="wrap">{`  ${launch.url}`}</Text>}
+          {launch.file && <Text color="cyan" bold wrap="wrap">{`  ${launch.file}`}</Text>}
+          {plan?.why && <Text dimColor wrap="wrap">{plan.why}</Text>}
+          <Text>{`B open in browser · C copy ${launch.url ? "link" : "path"}${launch.phase === "running" ? " · S stop" : ""}`}</Text>
+        </Box>
+      )}
+      {launch.phase === "done" && <Text color="green">✔ Finished. Output below.</Text>}
+      {launch.phase === "failed" && <Text color="red" wrap="wrap">{launch.why}</Text>}
+      {launch.phase === "stopped" && <Text dimColor>Stopped. Press Enter to start again.</Text>}
+      {launch.log && launch.phase !== "confirm" && (
+        <Box flexDirection="column">
+          <Text dimColor>Output</Text>
+          {launch.log.trim().split("\n").slice(-8).map((l, i) => <Text key={i} dimColor wrap="truncate-end">{`  ${l}`}</Text>)}
+        </Box>
+      )}
     </Box>
   );
 }

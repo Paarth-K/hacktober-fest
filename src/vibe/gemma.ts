@@ -369,6 +369,14 @@ export class VibeGemma {
     return { answer: `Gemma isn't available right now (${this.lastFailure ?? "no model"}), so this question can't be answered. Start Ollama and ask again.`, source: this.template() };
   }
 
+  async planLaunch(input: { workspace: WorkspaceSummary; latestChange: string; hasNodeModules: boolean; previousAttempts: { command: string; error: string }[] }): Promise<LaunchPlan | null> {
+    const out = await this.chat(LAUNCH_SYSTEM, input, LaunchOut, 300);
+    if (!out) return null;
+    const p = out.value;
+    // Drop empty strings so callers can test presence.
+    return { kind: p.kind, why: p.why, ...(p.command?.trim() ? { command: p.command.trim() } : {}), ...(p.url?.trim() ? { url: p.url.trim() } : {}), ...(p.file?.trim() ? { file: p.file.trim() } : {}) };
+  }
+
   async report(input: ReportInput): Promise<ReportBody> {
     const files = changedFiles(input.context);
     const omissions = input.context.omissions.map((o) => `${o.reason}: ${o.path}${o.detail ? ` (${o.detail})` : ""}`);
@@ -456,6 +464,28 @@ function jsonSchema(schema: z.ZodType): object | "json" {
     return "json";
   }
 }
+
+const LAUNCH_SYSTEM = `You help a non-technical person SEE the result of code changes in their project. Decide the simplest way to open it.
+Options (pick one "kind"):
+- "server": start the app/dev server with a shell command (prefer package.json scripts like "dev" or "start"; or e.g. "node src/server.js", "python -m http.server 8000"). Give the URL to open (include the page/endpoint most related to the latest change, e.g. http://localhost:3000/version).
+- "command": run a one-shot command whose output IS the result (CLI tools, scripts).
+- "file": open a file directly (e.g. index.html for a static site). Give its path relative to the project.
+- "url": just open a URL (no command).
+- "none": nothing to open; explain why.
+If dependencies are not installed (hasNodeModules=false and package.json has dependencies), prefix the command with the install step (e.g. "npm install && npm run dev").
+If previousAttempts is non-empty, read the errors and propose a FIXED command (different from the failed ones).
+Keep commands simple, local, and safe: no sudo, no deleting files, no network installs other than the project's own package manager.
+${UNTRUSTED}
+Return JSON: {"kind": "...", "command": "...", "url": "...", "file": "...", "why": "one plain-language sentence for the user"}.`;
+
+export type LaunchPlan = z.infer<typeof LaunchOut>;
+const LaunchOut = z.object({
+  kind: z.enum(["server", "command", "file", "url", "none"]),
+  command: z.string().max(500).optional(),
+  url: z.string().max(500).optional(),
+  file: z.string().max(500).optional(),
+  why: z.string().max(500).default(""),
+});
 
 export interface AnswerResult {
   answer: string;

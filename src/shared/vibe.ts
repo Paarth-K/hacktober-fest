@@ -146,6 +146,28 @@ export const VibeSessionSchema = z.object({
 });
 export type VibeSession = z.infer<typeof VibeSessionSchema>;
 
+/** How Gemma decided to show the result. */
+export const LaunchPlanSchema = z.object({
+  /** server: start a long-running process and open its URL; command: run once and show output; file: open a file; url: just open. */
+  kind: z.enum(["server", "command", "file", "url", "none"]),
+  command: z.string().max(500).optional(),
+  url: z.string().max(500).optional(),
+  file: z.string().max(500).optional(),
+  why: z.string().max(500).default(""),
+});
+
+export const LaunchStateSchema = z.object({
+  id: IdSchema,
+  phase: z.enum(["planning", "confirm", "starting", "running", "ready", "done", "failed", "stopped"]),
+  plan: LaunchPlanSchema.optional(),
+  url: z.string().optional(),
+  file: z.string().optional(),
+  attempts: z.number().int().nonnegative(),
+  log: z.string().max(6000).default(""),
+  why: z.string().max(1000).default(""),
+});
+export type LaunchState = z.infer<typeof LaunchStateSchema>;
+
 /** Compact row for the history list. */
 export const VibeHistoryItemSchema = z.object({
   id: IdSchema,
@@ -192,6 +214,11 @@ export const VibeClientMessages = [
   msg("vibe_reset", z.object({})),
   /** Reopen a past session from history. */
   msg("vibe_open", z.object({ vibeId: IdSchema })),
+  /** "See it": Gemma plans how to open the result. */
+  msg("launch_plan", z.object({})),
+  /** Run the planned command (user saw the exact text). */
+  msg("launch_confirm", z.object({})),
+  msg("launch_stop", z.object({})),
 ] as const;
 
 export const VibeServerMessages = [
@@ -200,6 +227,7 @@ export const VibeServerMessages = [
   /** Incremental live agent output. */
   msg("vibe_agent_event", z.object({ vibeId: IdSchema, event: VibeAgentEventSchema })),
   msg("coding_agents", z.array(CodingAgentInfoSchema)),
+  msg("launch_updated", LaunchStateSchema),
   /** Gemma's live reasoning for a session (latest text so far). */
   msg("vibe_thinking", z.object({ vibeId: IdSchema, text: z.string().max(20_000) })),
 ] as const;

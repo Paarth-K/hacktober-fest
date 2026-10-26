@@ -19,7 +19,7 @@ import {
   TaskSchema,
   VerificationRunSchema,
 } from "./schemas.js";
-import { CodingAgentInfoSchema, VibeClientMessages, VibeHistoryItemSchema, VibeServerMessages, VibeSessionSchema } from "./vibe.js";
+import { CodingAgentInfoSchema, LaunchStateSchema, VibeClientMessages, VibeHistoryItemSchema, VibeServerMessages, VibeSessionSchema } from "./vibe.js";
 
 const msg = <T extends string, P extends z.ZodTypeAny>(type: T, payload: P) =>
   z.object({ type: z.literal(type), payload });
@@ -146,6 +146,8 @@ export const StateSnapshotSchema = z.object({
   codingAgents: z.array(CodingAgentInfoSchema).default([]),
   /** Past vibe sessions for this workspace, newest first. */
   vibeHistory: z.array(VibeHistoryItemSchema).default([]),
+  /** "See it" launcher state. */
+  launch: LaunchStateSchema.nullable().default(null),
 });
 export type StateSnapshot = z.infer<typeof StateSnapshotSchema>;
 
