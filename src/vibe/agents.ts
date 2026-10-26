@@ -35,7 +35,7 @@ export const AGENTS: Record<CodingAgentId, AgentDescriptor> = {
     id: "claude",
     name: "Claude Code",
     display: (o) =>
-      `claude -p <refined prompt> --output-format stream-json --verbose --permission-mode ${o.allowCommands ? "auto" : "acceptEdits"} --disallowedTools ${CLAUDE_DENY.map((d) => `"${d}"`).join(" ")}`,
+      `claude -p <refined prompt> --output-format stream-json --verbose --permission-mode ${o.allowCommands ? "auto" : "acceptEdits"} --model ${process.env.LCC_CLAUDE_MODEL || "haiku"} --disallowedTools ${CLAUDE_DENY.map((d) => `"${d}"`).join(" ")}`,
     permissions: (o) =>
       o.allowCommands
         ? "Automatic permissions: edits files and runs commands without asking (Claude's auto mode). .env/key files are blocked."
@@ -69,6 +69,9 @@ export function claudeCommand(prompt: string, o: RunOptions, env: NodeJS.Process
       "--verbose",
       "--permission-mode",
       o.allowCommands ? "auto" : "acceptEdits",
+      // Fast by default: Haiku without extended thinking (LCC_CLAUDE_MODEL / lcc --setup to change).
+      "--model",
+      env.LCC_CLAUDE_MODEL || "haiku",
       "--disallowedTools",
       ...CLAUDE_DENY,
     ],
@@ -93,7 +96,7 @@ export function agentEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
     if (k === "CLAUDECODE" || k.startsWith("CLAUDE_CODE_") || k === "CLAUDE_PID" || k === "CLAUDE_EFFORT") continue;
     out[k] = v;
   }
-  return { ...out, NO_COLOR: "1", FORCE_COLOR: "0" };
+  return { ...out, NO_COLOR: "1", FORCE_COLOR: "0", ...(env.LCC_CLAUDE_THINKING === "1" ? {} : { MAX_THINKING_TOKENS: "0" }) };
 }
 
 export async function detectAgents(env: NodeJS.ProcessEnv = process.env): Promise<CodingAgentInfo[]> {

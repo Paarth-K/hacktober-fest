@@ -8,6 +8,10 @@ import {
 } from "../../../shared/index.js";
 
 export interface UiState extends StateSnapshot {
+  /** Every session seen this run, by id (several can run at once). */
+  sessions: Record<string, import("../../../shared/index.js").VibeSession>;
+  /** Gemma's live reasoning per session. */
+  thinking: Record<string, string>;
   explanation: ExplanationResponse | null;
   breakdown: TaskBreakdownSuggestion | null;
   runningVerificationChecks: Record<string, string>;
@@ -30,12 +34,14 @@ export const initialUiState: UiState = {
   vibe: null,
   codingAgents: [],
   vibeHistory: [],
+  sessions: {},
+  thinking: {},
 };
 
 export function applyEngineEvent(state: UiState, event: ServerEnvelope): UiState {
   switch (event.type) {
     case "state_snapshot":
-      return { ...state, ...event.payload };
+      return { ...state, ...event.payload, sessions: event.payload.vibe ? { ...state.sessions, [event.payload.vibe.id]: event.payload.vibe } : state.sessions };
     case "progress_updated":
       return { ...state, progress: event.payload };
     case "change_batch":
@@ -74,13 +80,24 @@ export function applyEngineEvent(state: UiState, event: ServerEnvelope): UiState
       return { ...state, modelStatus: event.payload };
     case "preferences_updated":
       return { ...state, preferences: event.payload };
-    case "vibe_updated":
-      // Keep the incoming session's events if it is the same session (agent events stream separately).
-      return { ...state, vibe: event.payload };
-    case "vibe_agent_event":
-      return state.vibe?.id === event.payload.vibeId
-        ? { ...state, vibe: { ...state.vibe, events: [...state.vibe.events, event.payload.event].slice(-300) } }
-        : state;
+    case "vibe_updated": {
+      // Several sessions can run at once: track all, but only the one being viewed is `vibe`.
+      const s = event.payload;
+      const viewing = !state.vibe || state.vibe.id === s.id;
+      const thinking = ["clarifying", "refining", "reporting"].includes(s.phase) || s.qa.some((x) => x.pending) ? state.thinking : { ...state.thinking, [s.id]: "" };
+      return { ...state, sessions: { ...state.sessions, [s.id]: s }, thinking, ...(viewing ? { vibe: s } : {}) };
+    }
+    case "vibe_agent_event": {
+      const cur = state.sessions[event.payload.vibeId];
+      const next = cur ? { ...cur, events: [...cur.events, event.payload.event].slice(-300) } : undefined;
+      return {
+        ...state,
+        ...(next ? { sessions: { ...state.sessions, [next.id]: next } } : {}),
+        ...(state.vibe?.id === event.payload.vibeId && next ? { vibe: next } : {}),
+      };
+    }
+    case "vibe_thinking":
+      return { ...state, thinking: { ...state.thinking, [event.payload.vibeId]: event.payload.text } };
     case "coding_agents":
       return { ...state, codingAgents: event.payload };
     case "open_file_result":

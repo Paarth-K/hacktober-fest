@@ -7,11 +7,14 @@ import WebSocket from "ws";
 import { startEngine } from "../engine/main.js";
 import { EngineClient } from "../shared/wsClient.js";
 import { App } from "./App.js";
+import { applyConfigEnv, loadConfig } from "./config.js";
+import { Setup } from "./Setup.js";
 
 const args = process.argv.slice(2);
 const folder = resolve(args.find((a) => !a.startsWith("--")) ?? process.cwd());
+const config = loadConfig();
 const agentArg = args.find((a) => a.startsWith("--agent="))?.split("=")[1];
-const agent = agentArg === "codex" ? "codex" : "claude";
+const agent = agentArg === "codex" ? "codex" : agentArg === "claude" ? "claude" : config.agent;
 
 if (!existsSync(folder) || !statSync(folder).isDirectory()) {
   console.error(`lcc: not a folder: ${folder}`);
@@ -22,7 +25,23 @@ if (!process.stdin.isTTY) {
   process.exit(1);
 }
 
+if (args.includes("--setup")) {
+  let installed: string[] = [];
+  try {
+    const r = await fetch(`${process.env.OLLAMA_BASE_URL ?? "http://127.0.0.1:11434"}/api/tags`, { signal: AbortSignal.timeout(2000) });
+    installed = ((await r.json()) as { models?: { name: string }[] }).models?.map((m) => m.name).filter((n) => /gemma/i.test(n)) ?? [];
+  } catch {
+    /* Ollama not running: only the downloadable option is shown */
+  }
+  const app = render(<Setup initial={config} installedGemma={installed} />);
+  await app.waitUntilExit();
+  process.exit(0);
+}
+
+applyConfigEnv(config);
 const engine = await startEngine({ workspace: folder, quiet: true });
+engine.orchestrator.state.preferences = { ...engine.orchestrator.state.preferences, level: config.level };
+void engine.orchestrator.warmUpGemma(); // load the model now so the first question is quick
 const client = new EngineClient({ port: engine.bridge.port, token: engine.bridge.token }, { WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket });
 client.connect();
 
@@ -34,7 +53,7 @@ const shutdown = async () => {
   await engine.stop();
 };
 
-const app = render(<App client={client} agent={agent} onQuit={() => void shutdown()} />, { exitOnCtrlC: false });
+const app = render(<App client={client} agent={agent} autoPermissions={config.autoPermissions} onQuit={() => void shutdown()} />, { exitOnCtrlC: false });
 await app.waitUntilExit();
 await shutdown();
 process.exit(0);

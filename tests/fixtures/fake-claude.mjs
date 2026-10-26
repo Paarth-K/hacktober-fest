@@ -7,8 +7,16 @@ const out = (o) => process.stdout.write(JSON.stringify(o) + "\n");
 out({ type: "system", subtype: "init" });
 out({ type: "assistant", message: { content: [{ type: "text", text: "I'll add the feature." }, { type: "tool_use", name: "Write", input: { file_path: `${process.cwd()}/src/feature.js` } }] } });
 mkdirSync("src", { recursive: true });
-writeFileSync("src/feature.js", "export function feature() {\n  return 42;\n}\n");
-writeFileSync("README.md", "# demo\n\nNow with feature().\n");
+const named = /FILE=([\w./-]+)/.exec(prompt)?.[1];
+if (named) {
+  // Parallel-run tests: write one named file, announce it like Claude does, then wait.
+  out({ type: "assistant", message: { content: [{ type: "tool_use", name: "Write", input: { file_path: `${process.cwd()}/${named}` } }] } });
+  writeFileSync(named, `export const v = ${JSON.stringify(named)};\n`);
+  if (prompt.includes("WAIT")) await new Promise((r) => setTimeout(r, 3000));
+} else {
+  writeFileSync("src/feature.js", "export function feature() {\n  return 42;\n}\n");
+  writeFileSync("README.md", "# demo\n\nNow with feature().\n");
+}
 out({ type: "user", message: { content: [{ type: "tool_result", is_error: true, content: "This command requires approval" }] } });
 if (prompt.includes("SLOW")) await new Promise((r) => setTimeout(r, 60_000));
 out({ type: "result", subtype: "success", is_error: false, result: `Done. Added feature() (prompt had ${prompt.length} chars).` });

@@ -75,8 +75,8 @@ export const VibeReportSchema = z.object({
   /** Design tradeoffs visible in the diffs (only when supported). */
   tradeoffs: z.array(z.string()).default([]),
   nextSteps: z.array(z.string()),
-  /** One question to help the developer learn from this change, with its answer. */
-  learningQuestion: z.object({ question: z.string(), answer: z.string() }).optional(),
+  /** Gemma's check of each "done when" criterion against the diffs (a review, not a test). */
+  criteriaStatus: z.array(z.object({ text: z.string(), met: z.boolean(), why: z.string().default("") })).default([]),
   citations: z.array(CitationSchema),
   invalidCitations: z.array(z.object({ path: z.string(), startLine: z.number(), endLine: z.number() })).default([]),
   omissions: z.array(z.string()).default([]),
@@ -119,6 +119,8 @@ export const VibeSessionSchema = z.object({
   /** Pause at the refined prompt for review (else the agent runs as soon as the prompt is refined). */
   review: z.boolean().default(false),
   allowCommands: z.boolean().default(false),
+  /** "Done when" criteria Gemma wrote for this change. */
+  criteria: z.array(z.string().max(300)).default([]),
   /** Progress-tracking task created for this prompt (evidence + criteria live there). */
   taskId: IdSchema.optional(),
   /** Clarification rounds so far (Gemma re-checks after answers; max 2). */
@@ -131,6 +133,10 @@ export const VibeSessionSchema = z.object({
   run: VibeRunSchema.optional(),
   events: z.array(VibeAgentEventSchema).default([]),
   changeBatchIds: z.array(IdSchema).default([]),
+  /** Files this change's agent edited (from its own tool calls). */
+  touched: z.array(z.string()).default([]),
+  /** Another change was running at the same time (reports are then limited to `touched`). */
+  parallel: z.boolean().default(false),
   /** Test command detected from the workspace (package.json "test" -> npm test, Cargo.toml -> cargo test, ...). */
   suggestedCheck: z.string().max(500).optional(),
   /** Verification runs the user started from this session's report (real exit codes). */
@@ -194,4 +200,6 @@ export const VibeServerMessages = [
   /** Incremental live agent output. */
   msg("vibe_agent_event", z.object({ vibeId: IdSchema, event: VibeAgentEventSchema })),
   msg("coding_agents", z.array(CodingAgentInfoSchema)),
+  /** Gemma's live reasoning for a session (latest text so far). */
+  msg("vibe_thinking", z.object({ vibeId: IdSchema, text: z.string().max(20_000) })),
 ] as const;

@@ -16,7 +16,12 @@ export interface EngineLike {
   onState(handler: (s: ConnectionState) => void): () => void;
 }
 
-export function App({ client, agent = "claude", onQuit }: { client: EngineLike; agent?: CodingAgentId; onQuit?: () => void }) {
+export interface Settings {
+  agent: CodingAgentId;
+  autoPermissions: boolean;
+}
+
+export function App({ client, agent = "claude", autoPermissions = true, onQuit }: { client: EngineLike; agent?: CodingAgentId; autoPermissions?: boolean; onQuit?: () => void }) {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const [ui, setUi] = useState(initialUiState);
@@ -26,8 +31,6 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState(0);
   const [toast, setToast] = useState("");
-  const [queued, setQueued] = useState<string | null>(null);
-  const [revealQuiz, setRevealQuiz] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [scroll, setScroll] = useState(0);
   const [contentH, setContentH] = useState(0);
@@ -66,12 +69,18 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
   const busy = !!vibe && BUSY_PHASES.includes(vibe.phase);
   const level: Level = vibe?.level ?? ui.preferences.level;
   const task = vibe?.taskId ? ui.tasks.find((t) => t.id === vibe.taskId) : undefined;
+  // This launch's changes, newest first, with live phases (several can run at once).
   const history = useMemo(() => {
-    const h = ui.vibeHistory.filter((x) => x.createdAt >= sessionStart).map((x) => (vibe && x.id === vibe.id ? { ...x, phase: vibe.phase } : x));
-    return vibe && !h.some((x) => x.id === vibe.id)
-      ? [{ id: vibe.id, createdAt: vibe.createdAt, originalPrompt: vibe.originalPrompt, agent: vibe.agent, phase: vibe.phase, filesChanged: 0, verified: "none" as const }, ...h]
-      : h;
-  }, [ui.vibeHistory, vibe, sessionStart]);
+    const byId = new Map(ui.vibeHistory.filter((h) => h.createdAt >= sessionStart).map((h) => [h.id, h]));
+    for (const x of Object.values(ui.sessions)) {
+      if (x.createdAt < sessionStart) continue;
+      const prev = byId.get(x.id);
+      byId.set(x.id, { id: x.id, createdAt: x.createdAt, originalPrompt: x.originalPrompt, agent: x.agent, phase: x.phase, filesChanged: x.report?.changes.length ?? prev?.filesChanged ?? 0, verified: prev?.verified ?? "none" });
+    }
+    return [...byId.values()].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }, [ui.sessions, ui.vibeHistory, sessionStart]);
+  const runningCount = history.filter((h) => h.phase === "running").length;
+  const thinking = vibe ? ui.thinking[vibe.id] ?? "" : "";
 
   // Follow the work: switch panes on meaningful phase transitions of the current change.
   useEffect(() => {
@@ -79,7 +88,6 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
     const prev = prevPhase.current.id === vibe.id ? prevPhase.current.phase : undefined;
     if (prevPhase.current.id !== vibe.id) {
       setAnswers({});
-      setRevealQuiz(false);
       setSelected(Math.max(0, history.findIndex((h) => h.id === vibe.id) + 1));
       if (prev === undefined && prevPhase.current.id !== undefined) setPane(paneForPhase(vibe.phase));
     }
@@ -89,14 +97,6 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
     prevPhase.current = { id: vibe.id, phase: vibe.phase };
   }, [vibe?.id, vibe?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Start the queued request once the current change settles.
-  useEffect(() => {
-    if (queued && vibe && !busy && vibe.phase !== "awaiting_answers") {
-      const p = queued;
-      setQueued(null);
-      start(p);
-    }
-  }, [busy, vibe?.phase]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const send = (m: ClientMessage) => {
     try {
@@ -106,8 +106,7 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
     }
   };
   const start = (prompt: string) => {
-    setToast("");
-    send({ type: "vibe_start", payload: { prompt, agent, review: false, allowCommands: true, level: ui.preferences.level } });
+    send({ type: "vibe_start", payload: { prompt, agent, review: false, allowCommands: autoPermissions, level: ui.preferences.level } });
   };
 
   // Unanswered clarifying questions, one at a time.
@@ -130,7 +129,6 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
 
   const openChange = (index: number) => {
     setSelected(index);
-    if (busy) return setToast("Claude is still working on the current change. Press Esc to stop it, or wait for it to finish.");
     if (index === 0) {
       send({ type: "vibe_reset", payload: {} });
       setPane("ask");
@@ -171,7 +169,7 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
     if (key.escape) {
       if (vibe && (vibe.phase === "running" || vibe.phase === "clarifying" || vibe.phase === "refining" || vibe.phase === "awaiting_answers")) {
         send({ type: "vibe_cancel", payload: { vibeId: vibe.id } });
-        return setToast(vibe.phase === "running" ? "Stopping Claude… I'll still explain whatever it changed." : "Cancelled.");
+        return setToast(vibe.phase === "running" ? "Stopping this change… I'll still explain whatever it changed." : "Cancelled this change.");
       }
       return setDrafts((d) => ({ ...d, [pane === "learn" ? "learn" : "ask"]: "" }));
     }
@@ -195,17 +193,13 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
     }
     if (key.return) {
       const text = draft.trim();
-      if (!text) {
-        if (box === "learn" && vibe?.report?.learningQuestion) setRevealQuiz(true);
-        return;
-      }
+      if (!text) return;
       setDrafts((d) => ({ ...d, [box]: "" }));
       if (box === "ask") {
         if (question) return answer(text);
-        if (busy) {
-          setQueued(text);
-          return setToast("Got it. I'll start that as soon as Claude finishes.");
-        }
+        // Starts in parallel with anything already running; Gemma keeps the agents out of each other's way.
+        setToast("");
+        if (runningCount > 0) setToast(`Starting alongside ${runningCount} running change${runningCount > 1 ? "s" : ""}. ↑↓ to switch between them.`);
         return start(text);
       }
       if (!vibe?.run) return setToast("Ask questions here after Claude has made a change.");
@@ -243,9 +237,9 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
             {!wide && history.length > 0 && <Text dimColor>{`· change ${Math.max(1, selected)} of ${history.length}`}</Text>}
           </Box>
           <ScrollArea height={areaH} scroll={scroll} onContentHeight={setContentH}>
-            {pane === "ask" && <AskPane vibe={vibe} question={question} questionNumber={qIndex + 1} questionCount={pendingQs.length} queued={queued} />}
+            {pane === "ask" && <AskPane vibe={vibe} question={question} questionNumber={qIndex + 1} questionCount={pendingQs.length} thinking={thinking} />}
             {pane === "progress" && <ProgressPane vibe={vibe} task={task} changeBatches={ui.changeBatches} runs={ui.verificationRuns} now={now} />}
-            {pane === "learn" && <LearnPane vibe={vibe} level={level} revealQuiz={revealQuiz} />}
+            {pane === "learn" && <LearnPane vibe={vibe} level={level} thinking={thinking} />}
           </ScrollArea>
           <ScrollHint above={scroll > 0} below={contentH - scroll > areaH} />
           {showBox && (
@@ -267,9 +261,9 @@ export function App({ client, agent = "claude", onQuit }: { client: EngineLike; 
 
 function hints(pane: Pane, phase: VibePhase | undefined, busy: boolean): string {
   const nav = "Ctrl+N new change · Tab switch view · ↑↓ changes · Ctrl+C quit";
-  if (phase === "running") return `Esc stop Claude · ${nav}`;
-  if (pane === "ask") return phase === "awaiting_answers" ? `Enter answer · Esc cancel · ${nav}` : `Enter send · ${nav}`;
-  if (pane === "learn") return `1-3 explanation level · Enter ask / show quiz answer · ${nav}`;
+  if (phase === "running") return `Esc stop this change · ${nav}`;
+  if (pane === "ask") return phase === "awaiting_answers" ? `Enter answer · Esc cancel · ${nav}` : busy ? `Enter start another change · Esc cancel this one · ${nav}` : `Enter send · ${nav}`;
+  if (pane === "learn") return `1-3 explanation level · Enter ask a question · ${nav}`;
   if (pane === "progress" && phase === "done") return `T check it works · ${nav}`;
   return busy ? `Esc stop · ${nav}` : nav;
 }

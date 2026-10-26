@@ -33,13 +33,13 @@ const tick = () => new Promise((r) => setTimeout(r, 30));
 const AT = new Date().toISOString();
 const session = (over: Partial<VibeSession>): VibeSession => ({
   id: "v1", createdAt: AT, updatedAt: AT, originalPrompt: "change the theme to dark mode", agent: "claude", phase: "clarifying",
-  level: "beginner", qa: [], review: false, allowCommands: true, questions: [], clarifyRounds: 0, answers: {}, assumptions: [],
-  events: [], changeBatchIds: [], verificationRunIds: [], ...over,
+  level: "beginner", qa: [], criteria: [], review: false, allowCommands: true, questions: [], clarifyRounds: 0, answers: {}, assumptions: [],
+  events: [], changeBatchIds: [], touched: [], parallel: false, verificationRunIds: [], ...over,
 });
 const report = {
   summary: "The app now uses dark colors everywhere.", changes: [{ path: "src/styles.css", kind: "modify" as const, added: 10, removed: 4, what: "Swapped the light colors for dark ones" }],
   addressed: ["Dark theme"], notAddressed: [], risks: ["Some images may look too bright"], tradeoffs: [], nextSteps: [], citations: [], invalidCitations: [], omissions: [],
-  learningQuestion: { question: "What is a CSS variable?", answer: "A named value you can reuse." },
+  criteriaStatus: [],
   source: { provider: "ollama:gemma4:31b", mode: "real" as const, model: "gemma4:31b" }, markdown: "", generatedAt: AT,
 };
 const snapshot = (vibe: VibeSession | null, history: unknown[] = []) => ({
@@ -110,11 +110,7 @@ describe("terminal UI flow", () => {
     expect(f).toContain("What happened");
     expect(f).toContain("The app now uses dark colors everywhere.");
     expect(f).toContain("styles.css — Swapped the light colors for dark ones");
-    expect(f).toContain("What is a CSS variable?");
-    expect(f).not.toContain("A named value you can reuse.");
-    stdin.write("\r"); // empty Enter reveals the quiz answer
-    await tick();
-    expect(lastFrame()).toContain("A named value you can reuse.");
+    expect(f).not.toContain("Quick quiz");
   });
 
   it("Learn: number keys change the explanation level; typing asks a question", async () => {
@@ -134,9 +130,10 @@ describe("terminal UI flow", () => {
     expect(engine.last("vibe_ask")?.payload).toEqual({ vibeId: "v1", question: "why 3 colors?" });
   });
 
-  it("a new request while Claude works is queued and starts when it finishes", async () => {
+  it("a new request while Claude works starts in parallel; Esc stops only the viewed change", async () => {
     const { engine, stdin, lastFrame } = setup();
-    engine.emit("state_snapshot", snapshot(session({ phase: "running", run: { agent: "claude", command: "c", allowCommands: true, startedAt: AT, outcome: "running" } })));
+    const running = session({ phase: "running", run: { agent: "claude", command: "c", allowCommands: true, startedAt: AT, outcome: "running" } });
+    engine.emit("state_snapshot", snapshot(running));
     await tick();
     stdin.write("\t"); // Progress -> Learn
     await tick();
@@ -146,11 +143,38 @@ describe("terminal UI flow", () => {
     await tick();
     stdin.write("\r");
     await tick();
-    expect(engine.sent.filter((m) => m.type === "vibe_start")).toHaveLength(0);
-    expect(lastFrame()).toContain("Got it. I'll start that as soon as Claude finishes.");
-    engine.emit("vibe_updated", session({ phase: "done", report, run: { agent: "claude", command: "c", allowCommands: true, startedAt: AT, outcome: "completed" } }));
-    await tick();
     expect(engine.last("vibe_start")?.payload.prompt).toBe("make buttons bigger");
+    expect(lastFrame()).toContain("Starting alongside 1 running change");
+    // second change arrives as current; the first keeps running in the list
+    const second = session({ id: "v2", createdAt: new Date(Date.now() + 10).toISOString(), originalPrompt: "make buttons bigger", phase: "clarifying" });
+    engine.emit("state_snapshot", snapshot(second));
+    engine.emit("vibe_updated", running);
+    await tick();
+    expect(lastFrame()).toContain("● change the theme");
+    stdin.write("\u001B");
+    await tick();
+    expect(engine.last("vibe_cancel")?.payload).toEqual({ vibeId: "v2" });
+  });
+
+  it("Progress 'Done when' shows Gemma's check of each criterion, and Gemma's thinking streams", async () => {
+    const { engine, lastFrame, stdin } = setup();
+    engine.emit("state_snapshot", snapshot(session({ phase: "refining" })));
+    engine.emit("vibe_thinking", { vibeId: "v1", text: "The user wants dark colors.\nI'll keep the brand pink." });
+    await tick();
+    expect(lastFrame()).toContain("Gemma is thinking");
+    expect(lastFrame()).toContain("I'll keep the brand pink.");
+    const run = { agent: "claude" as const, command: "c", allowCommands: true, startedAt: AT, outcome: "completed" as const };
+    engine.emit("vibe_updated", session({ phase: "running", criteria: ["Background is dark", "Text is readable"], run: { ...run, outcome: "running" } }));
+    await tick();
+    expect(lastFrame()).toContain("○ Background is dark");
+    engine.emit("vibe_updated", session({ phase: "reporting", criteria: ["Background is dark", "Text is readable"], run }));
+    engine.emit("vibe_updated", session({ phase: "done", criteria: ["Background is dark", "Text is readable"], run, report: { ...report, criteriaStatus: [{ text: "Background is dark", met: true, why: "body color set to #111" }, { text: "Text is readable", met: false, why: "" }] } }));
+    await tick();
+    expect(lastFrame()).toContain("What happened"); // switched to Learn
+    stdin.write("\u001B[Z"); // Shift+Tab -> Progress
+    await tick();
+    expect(lastFrame()).toContain("✔ Background is dark");
+    expect(lastFrame()).toContain("✖ Text is readable");
   });
 
   it("changes list: arrow keys open a past change", async () => {

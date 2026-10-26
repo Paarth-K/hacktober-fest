@@ -80,7 +80,11 @@ export class Orchestrator {
       );
     }
     this.provider = deps.createProvider(state.preferences);
-    const makeGemma = deps.createGemma ?? ((p: Preferences) => new VibeGemma({ provider: p.modelProvider, baseUrl: process.env.OLLAMA_BASE_URL, model: process.env.OLLAMA_MODEL }));
+    const think = process.env.LCC_GEMMA_THINK;
+    const makeGemma =
+      deps.createGemma ??
+      ((p: Preferences) =>
+        new VibeGemma({ provider: p.modelProvider, baseUrl: process.env.OLLAMA_BASE_URL, model: process.env.OLLAMA_MODEL, think: think === "low" || think === "medium" || think === "high" ? think : false }));
     this.gemma = makeGemma(state.preferences);
     this.vibe = new VibeController({
       workspace: () => this.ws(),
@@ -132,6 +136,11 @@ export class Orchestrator {
 
   private persist(): void {
     this.deps.store.save(this.state);
+  }
+
+  /** Load the local Gemma model into memory ahead of the first request. */
+  warmUpGemma(): Promise<void> {
+    return this.gemma.warmUp();
   }
 
   /** Save immediately (tests / shutdown). */
