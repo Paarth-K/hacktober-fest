@@ -47,8 +47,15 @@ export class Toaster {
     this.child?.stdin?.write(JSON.stringify({ message, icon, duration }) + "\n");
   }
 
+  /** Show exactly this text, in order with the other toasts (no rewording). */
+  private queueExact(text: string, icon: string, duration = 3): void {
+    this.queue = this.queue.then(() => this.show(text, icon, duration));
+  }
+
   /** Ask Gemma for a specific line about this event; show the plain text if it takes over 2.5s. */
   private lastRequest = "";
+  /** Checklist items already announced, per change. */
+  private ticked = new Map<string, Set<number>>();
 
   private say(fallback: string, icon: string, duration = 3, request = this.lastRequest): void {
     this.queue = this.queue.then(async () => {
@@ -70,6 +77,15 @@ export class Toaster {
   onEvent(e: ServerEnvelope): void {
     if (e.type === "vibe_updated") {
       const s = e.payload;
+      // A toast for each "done when" item the moment it's ticked off (live or in the final check).
+      const seen = this.ticked.get(s.id) ?? new Set<number>();
+      s.criteria.forEach((c, i) => {
+        if ((s.report?.criteriaStatus[i] ?? s.criteriaLive[i])?.met && !seen.has(i)) {
+          seen.add(i);
+          this.queueExact(`✓ ${truncate(c, 70)}`, "checkmark.circle.fill", 3.5);
+        }
+      });
+      this.ticked.set(s.id, seen);
       const prev = this.phases.get(s.id);
       if (prev === s.phase) return;
       this.phases.set(s.id, s.phase);
