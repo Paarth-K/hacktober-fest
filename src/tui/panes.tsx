@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { ChangeBatch, ClarifyQuestion, LaunchState, Level, Task, VerificationRun, VibeHistoryItem, VibeSession } from "../shared/index.js";
 import {
   BUSY_PHASES,
+  bar,
   LEVEL_LABEL,
   LEVELS,
   basename,
@@ -161,7 +162,17 @@ export function ProgressPane({ vibe, task, changeBatches, runs, now, othersRunni
       )}
       {vibe.criteria.length > 0 && (
         <Box flexDirection="column">
-          <Text bold>Done when</Text>
+          {(() => {
+            const total = vibe.criteria.length + (vibe.suggestedCheck ? 1 : 0);
+            const met = vibe.criteria.filter((_, i) => (vibe.report?.criteriaStatus[i] ?? vibe.criteriaLive[i])?.met).length + (lastRun?.result === "pass" ? 1 : 0);
+            return (
+              <Text>
+                <Text bold>Done when  </Text>
+                <Text color="green">{bar(met, total, 16)}</Text>
+                <Text color={met === total ? "green" : undefined} bold={met === total}>{`  ${met} of ${total}`}</Text>
+              </Text>
+            );
+          })()}
           {vibe.criteria.map((c, i) => {
             // Final report wins; while Claude works, items tick off live as Gemma sees them done.
             const fin = vibe.report?.criteriaStatus[i];

@@ -370,9 +370,14 @@ export class VibeGemma {
   }
 
   /** Which criteria the diffs so far already satisfy. Null when the model is unavailable. */
-  async checkCriteria(criteria: string[], request: string, context: ContextPacket): Promise<{ met: boolean; why: string }[] | null> {
+  async checkCriteria(criteria: string[], request: string, context: ContextPacket, filesNow: { path: string; content: string }[] = []): Promise<{ met: boolean; why: string }[] | null> {
     if (!criteria.length) return [];
-    const out = await this.chat(CRITERIA_SYSTEM, { request, criteria: criteria.map((text, index) => ({ index, text })), diffs: boundDiffs(context, 12_000) }, CriteriaOut, 300);
+    const out = await this.chat(
+      CRITERIA_SYSTEM,
+      { request, criteria: criteria.map((text, index) => ({ index, text })), diffs: boundDiffs(context, 8_000), filesEditedSoFar: filesNow },
+      CriteriaOut,
+      400,
+    );
     if (!out) return null;
     return criteria.map((_, i) => {
       const c = out.value.criteria.find((x) => x.index === i);
@@ -504,7 +509,7 @@ const LaunchOut = z.object({
   why: z.string().max(500).default(""),
 });
 
-const CRITERIA_SYSTEM = `A coding agent is in the middle of changing a repository. For each "done when" criterion, decide from the diffs SO FAR whether it is already done (met). Only mark met when the diffs clearly show it. Keep "why" under 12 words.
+const CRITERIA_SYSTEM = `A coding agent is in the middle of changing a repository. For each "done when" criterion, decide from the diffs and the current content of the files it has edited SO FAR whether it is already done (met). Only mark met when the diffs clearly show it. Keep "why" under 12 words.
 ${UNTRUSTED}
 Return JSON: {"criteria": [{"index": 0, "met": true, "why": "..."}]}.`;
 const CriteriaOut = z.object({ criteria: z.array(z.object({ index: z.number().int().nonnegative(), met: z.boolean(), why: z.string().max(200).default("") })).max(10) });

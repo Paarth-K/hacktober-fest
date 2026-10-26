@@ -414,7 +414,7 @@ export class VibeController {
     clearTimeout(this.criteriaTimers.get(vibeId));
     this.criteriaTimers.set(
       vibeId,
-      setTimeout(() => void this.checkCriteriaNow(vibeId), 1500),
+      setTimeout(() => void this.checkCriteriaNow(vibeId), 2000),
     );
   }
 
@@ -429,7 +429,21 @@ export class VibeController {
         const mine = new Set(s.touched);
         context = { ...context, diffs: context.diffs.filter((d) => mine.has(d.path)), evidence: context.evidence.filter((e) => mine.has(e.path)) };
       }
-      const live = await this.deps.gemma().checkCriteria(s.criteria, s.originalPrompt, context);
+      // Current content of the files the agent has edited so far (read live from disk, bounded).
+      const root = this.deps.workspace()?.project.rootPath;
+      const filesNow: { path: string; content: string }[] = [];
+      let budget = 12_000;
+      for (const rel of [...s.touched].reverse().slice(0, 6)) {
+        if (!root || budget <= 0 || rel.startsWith("/") || rel.includes("..")) continue;
+        try {
+          const content = readFileSync(join(root, rel), "utf8").slice(0, Math.min(4000, budget));
+          budget -= content.length;
+          filesNow.push({ path: rel, content });
+        } catch {
+          /* deleted or unreadable */
+        }
+      }
+      const live = await this.deps.gemma().checkCriteria(s.criteria, s.originalPrompt, context, filesNow);
       const cur = this.find(vibeId);
       // Items only move forward while running (no flicker back to unchecked); the final report decides.
       if (live && cur && !cur.report) this.update(vibeId, { criteriaLive: live.map((c, i) => (cur.criteriaLive[i]?.met ? cur.criteriaLive[i]! : c)) });
@@ -489,6 +503,8 @@ export class VibeController {
           c.touched.add(rel);
           s.touched = [...s.touched, rel];
         }
+        // Live checklist: re-check shortly after each edit (the file watcher batches too slowly for this).
+        this.scheduleCriteriaCheck(vibeId);
       }
     }
     this.deps.broadcast({ type: "vibe_agent_event", payload: { vibeId, event: e } });
