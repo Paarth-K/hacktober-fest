@@ -28,6 +28,8 @@ import { generateReport } from "./report.js";
 import { runCheck } from "./verification.js";
 import { VibeController } from "../vibe/controller.js";
 import { VibeGemma } from "../vibe/gemma.js";
+import { Launcher } from "../vibe/launcher.js";
+import { workspaceSummary } from "../vibe/controller.js";
 
 export const MAX_BATCHES = 200;
 export const MAX_RUNS = 200;
@@ -63,6 +65,7 @@ export class Orchestrator {
   private readonly log: (m: string) => void;
   private readonly now: () => Date;
   readonly vibe: VibeController;
+  readonly launcher: Launcher;
   private gemma: VibeGemma;
 
   constructor(private deps: OrchestratorDeps) {
@@ -108,6 +111,16 @@ export class Orchestrator {
       runs: (ids) => (this.ws()?.verificationRuns ?? []).filter((r) => ids.includes(r.id)),
       ...deps.vibe,
     });
+    this.launcher = new Launcher({
+      root: () => this.ws()?.project.rootPath ?? null,
+      gemma: () => this.gemma,
+      summary: workspaceSummary,
+      latestChange: () => {
+        const v = this.vibe.current() ?? this.ws()?.vibeSessions.at(-1);
+        return v ? `${v.originalPrompt}\n${v.report?.summary ?? ""}\nFiles: ${(v.report?.changes ?? []).map((c) => c.path).join(", ")}` : "";
+      },
+      broadcast: (m) => deps.broadcast(m),
+    });
     this.rebuildGemma = () => (this.gemma = makeGemma(this.state.preferences));
   }
   private rebuildGemma: () => void;
@@ -126,6 +139,7 @@ export class Orchestrator {
   async stop(): Promise<void> {
     if (this.stallTimer) clearInterval(this.stallTimer);
     this.vibe.stop();
+    this.launcher.dispose();
     await this.deps.observer.stop().catch(() => {});
     this.deps.store.flush();
   }
@@ -226,6 +240,7 @@ export class Orchestrator {
       vibe: this.vibe.current(),
       codingAgents: this.vibe.agents,
       vibeHistory: this.vibe.history(),
+      launch: this.launcher.state,
     };
   }
 
@@ -492,6 +507,13 @@ export class Orchestrator {
 
       case "open_file":
         return reply({ type: "open_file_result", payload: this.resolveOpenFile(env.payload.path, env.payload.line) });
+
+      case "launch_plan":
+        return this.launcher.plan();
+      case "launch_confirm":
+        return this.launcher.confirm();
+      case "launch_stop":
+        return this.launcher.stop();
 
       case "vibe_start":
       case "vibe_answer":

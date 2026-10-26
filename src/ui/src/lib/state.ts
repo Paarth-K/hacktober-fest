@@ -34,6 +34,7 @@ export const initialUiState: UiState = {
   vibe: null,
   codingAgents: [],
   vibeHistory: [],
+  launch: null,
   sessions: {},
   thinking: {},
 };
@@ -96,6 +97,8 @@ export function applyEngineEvent(state: UiState, event: ServerEnvelope): UiState
         ...(state.vibe?.id === event.payload.vibeId && next ? { vibe: next } : {}),
       };
     }
+    case "launch_updated":
+      return { ...state, launch: event.payload };
     case "vibe_thinking":
       return { ...state, thinking: { ...state.thinking, [event.payload.vibeId]: event.payload.text } };
     case "coding_agents":

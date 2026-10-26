@@ -1,9 +1,9 @@
 // Plain-language helpers for the terminal UI. Pure functions (unit-tested).
 import type { Level, Task, VibeAgentEvent, VibeHistoryItem, VibePhase, VibeSession } from "../shared/index.js";
 
-export type Pane = "ask" | "progress" | "learn";
-export const PANES: Pane[] = ["ask", "progress", "learn"];
-export const PANE_LABEL: Record<Pane, string> = { ask: "Ask", progress: "Progress", learn: "Learn" };
+export type Pane = "ask" | "progress" | "learn" | "see";
+export const PANES: Pane[] = ["ask", "progress", "learn", "see"];
+export const PANE_LABEL: Record<Pane, string> = { ask: "Ask", progress: "Progress", learn: "Learn", see: "See it" };
 
 export const LEVELS: Level[] = ["beginner", "intermediate", "expert"];
 export const LEVEL_LABEL: Record<Level, string> = { beginner: "New to coding", intermediate: "Learning", expert: "Experienced" };

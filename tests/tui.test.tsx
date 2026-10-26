@@ -137,7 +137,9 @@ describe("terminal UI flow", () => {
     await tick();
     stdin.write("\t"); // Progress -> Learn
     await tick();
-    stdin.write("\t"); // Learn -> Ask
+    stdin.write("\t"); // Learn -> See it
+    await tick();
+    stdin.write("\t"); // See it -> Ask
     await tick();
     stdin.write("make buttons bigger");
     await tick();
@@ -206,7 +208,7 @@ describe("layout", () => {
     await tick();
     const f = lastFrame()!;
     expect(f.split("\n").length).toBeLessThanOrEqual(30);
-    expect(f).toContain("◆ Companion");
+    expect(f).toContain("◆ Sidekick");
     expect(f).toContain("Ask anything about this change");
     expect(f).toContain("▼ more below");
     stdin.write("\u001B[6~"); // PgDn
