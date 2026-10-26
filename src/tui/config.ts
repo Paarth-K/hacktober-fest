@@ -1,4 +1,4 @@
-// User settings for the terminal app (written by `lcc --setup`).
+// User settings for the terminal app (written by `skck --setup`).
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";

@@ -9,6 +9,10 @@ import type { ClarifyQuestion, GemmaSource, VibeReport } from "../shared/vibe.js
 export type Thinking = (textSoFar: string) => void;
 
 export interface GemmaOptions {
+  /** Vercel AI Gateway key (AI_GATEWAY_API_KEY): use the hosted Gemma instead of local Ollama. */
+  gatewayKey?: string;
+  gatewayModel?: string;
+  gatewayUrl?: string;
   /** Let Gemma reason before answering ("low" is a good balance); streamed to the UI via onThinking. */
   think?: boolean | "low" | "medium" | "high";
   numCtx?: number;
@@ -136,10 +140,12 @@ export class VibeGemma {
   private readonly fetcher: typeof fetch;
   private modelPromise: Promise<string | null> | null = null;
   lastFailure: string | undefined;
+  private readonly gateway: { key: string; model: string; url: string } | null;
 
   constructor(private readonly opts: GemmaOptions) {
     const url = new URL(opts.baseUrl ?? "http://127.0.0.1:11434");
     if (!["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)) throw new GemmaError("Ollama must use a loopback URL");
+    this.gateway = opts.provider !== "mock" && opts.gatewayKey ? { key: opts.gatewayKey, model: opts.gatewayModel || "google/gemma-4-26b-a4b-it", url: (opts.gatewayUrl || "https://ai-gateway.vercel.sh/v1").replace(/\/$/, "") } : null;
     this.baseUrl = url.href.replace(/\/$/, "");
     this.fetcher = opts.fetch ?? fetch;
   }
@@ -162,6 +168,7 @@ export class VibeGemma {
 
   /** Load the model into memory ahead of the first request (first call otherwise pays the load time). */
   async warmUp(): Promise<void> {
+    if (this.gateway) return;
     const model = await this.model();
     if (!model) return;
     try {
@@ -173,6 +180,7 @@ export class VibeGemma {
 
   /** Streams the reply; thinking text (when enabled) is forwarded live via onThinking. */
   private async chat<T>(system: string, user: unknown, schema: z.ZodType<T>, maxTokens = 1200, onThinking?: Thinking): Promise<{ value: T; source: GemmaSource } | null> {
+    if (this.gateway) return this.chatGateway(system, user, schema, maxTokens, onThinking);
     const model = await this.model();
     if (!model) {
       this.lastFailure = this.opts.provider === "mock" ? "mock selected" : "no local Gemma model reachable";
@@ -242,6 +250,71 @@ export class VibeGemma {
       return { value, source: { provider: `ollama:${model}`, mode: "real", model } };
     } catch (e) {
       this.lastFailure = controller.signal.aborted ? "local model timed out" : e instanceof z.ZodError ? "model output did not match the schema" : e instanceof Error ? e.message : String(e);
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** Vercel AI Gateway (OpenAI-compatible, streamed). Note: prompts and diffs leave this machine. */
+  private async chatGateway<T>(system: string, user: unknown, schema: z.ZodType<T>, maxTokens: number, onThinking?: Thinking): Promise<{ value: T; source: GemmaSource } | null> {
+    const g = this.gateway!;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.opts.timeoutMs ?? 120_000);
+    try {
+      const res = await this.fetcher(`${g.url}/chat/completions`, {
+        method: "POST",
+        signal: controller.signal,
+        headers: { "content-type": "application/json", authorization: `Bearer ${g.key}` },
+        body: JSON.stringify({
+          model: g.model,
+          stream: true,
+          max_tokens: maxTokens,
+          temperature: 0.1,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: `${system}\nReply with JSON only.` },
+            { role: "user", content: JSON.stringify(user) },
+          ],
+        }),
+      });
+      if (!res.ok) throw new GemmaError(`AI Gateway HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+      let content = "";
+      let buf = "";
+      const handle = (line: string) => {
+        const t = line.trim();
+        if (!t.startsWith("data:")) return;
+        const p = t.slice(5).trim();
+        if (!p || p === "[DONE]") return;
+        const d = JSON.parse(p) as { choices?: { delta?: { content?: string; reasoning?: string } }[]; error?: { message?: string } };
+        if (d.error) throw new GemmaError(d.error.message ?? "gateway error");
+        const delta = d.choices?.[0]?.delta?.content;
+        if (delta) {
+          content += delta;
+          onThinking?.(jsonPreview(content));
+        }
+      };
+      const reader = res.body?.getReader();
+      if (reader) {
+        const dec = new TextDecoder();
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += dec.decode(value, { stream: true });
+          let i: number;
+          while ((i = buf.indexOf("\n")) >= 0) {
+            handle(buf.slice(0, i));
+            buf = buf.slice(i + 1);
+          }
+        }
+        handle(buf);
+      } else for (const l of (await res.text()).split("\n")) handle(l);
+      const cleaned = content.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, "$1");
+      const value = schema.parse(JSON.parse(cleaned));
+      this.lastFailure = undefined;
+      return { value, source: { provider: `vercel:${g.model}`, mode: "real", model: g.model } };
+    } catch (e) {
+      this.lastFailure = controller.signal.aborted ? "AI Gateway timed out" : e instanceof z.ZodError ? "model output did not match the schema" : e instanceof Error ? e.message : String(e);
       return null;
     } finally {
       clearTimeout(timer);
