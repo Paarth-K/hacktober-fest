@@ -1,5 +1,5 @@
-// `lcc` terminal app entry: runs the engine in-process for a project folder and renders the Ink UI.
-//   lcc [folder] [--agent=claude|codex]
+// `skck` terminal app entry: runs the engine in-process for a project folder and renders the Ink UI.
+//   skck [folder] [--agent=claude|codex]
 import { render } from "ink";
 import { existsSync, statSync } from "node:fs";
 import { resolve } from "node:path";
@@ -17,11 +17,11 @@ const agentArg = args.find((a) => a.startsWith("--agent="))?.split("=")[1];
 const agent = agentArg === "codex" ? "codex" : agentArg === "claude" ? "claude" : config.agent;
 
 if (!existsSync(folder) || !statSync(folder).isDirectory()) {
-  console.error(`lcc: not a folder: ${folder}`);
+  console.error(`skck: not a folder: ${folder}`);
   process.exit(1);
 }
 if (!process.stdin.isTTY) {
-  console.error("lcc needs an interactive terminal.");
+  console.error("skck needs an interactive terminal.");
   process.exit(1);
 }
 
@@ -33,7 +33,8 @@ if (args.includes("--setup")) {
   } catch {
     /* Ollama not running: only the downloadable option is shown */
   }
-  const app = render(<Setup initial={config} installedGemma={installed} />);
+  const gateway = process.env.AI_GATEWAY_API_KEY ? process.env.SIDEKICK_GEMMA_MODEL || "google/gemma-4-26b-a4b-it" : undefined;
+  const app = render(<Setup initial={config} installedGemma={installed} gateway={gateway} />);
   await app.waitUntilExit();
   process.exit(0);
 }
@@ -41,7 +42,7 @@ if (args.includes("--setup")) {
 applyConfigEnv(config);
 const engine = await startEngine({ workspace: folder, quiet: true });
 engine.orchestrator.state.preferences = { ...engine.orchestrator.state.preferences, level: config.level };
-void engine.orchestrator.warmUpGemma(); // load the model now so the first question is quick
+void engine.orchestrator.warmUpGemma(); // local Ollama: load the model now so the first question is quick
 const client = new EngineClient({ port: engine.bridge.port, token: engine.bridge.token }, { WebSocketImpl: WebSocket as unknown as typeof globalThis.WebSocket });
 client.connect();
 

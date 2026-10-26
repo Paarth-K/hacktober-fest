@@ -219,7 +219,7 @@ export function App({ client, agent = "claude", autoPermissions = true, onQuit }
     <Box flexDirection="column" width={cols}>
       <Box justifyContent="space-between" paddingX={1}>
         <Text>
-          <Text color="cyan" bold>◆ Companion</Text>
+          <Text color="cyan" bold>◆ Sidekick</Text>
           <Text dimColor>{"  ·  "}</Text>
           <Text bold>{folder}</Text>
         </Text>

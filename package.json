@@ -1,7 +1,7 @@
 {
-  "name": "local-code-companion",
+  "name": "sidekick-cli",
   "version": "0.1.0",
-  "description": "Local-first floating desktop companion that tracks project completion and explains local code edits",
+  "description": "Sidekick: tell it what to change; local Gemma asks, Claude Code builds, Gemma explains",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:mock": "node scripts/dev.mjs --mock",
@@ -20,8 +20,8 @@
     "smoke:gemma": "tsx scripts/live-gemma-smoke.ts",
     "demo": "node scripts/demo.mjs",
     "demo:agent": "node scripts/demo-agent.mjs",
-    "start": "node bin/lcc.mjs",
-    "build:cli": "esbuild src/tui/index.tsx --bundle --platform=node --format=esm --target=node22 --jsx=automatic --packages=external --log-level=warning --outfile=dist-cli/lcc.mjs",
+    "start": "node bin/skck.mjs",
+    "build:cli": "esbuild src/tui/index.tsx --bundle --platform=node --format=esm --target=node22 --jsx=automatic --packages=external --log-level=warning --outfile=dist-cli/skck.mjs",
     "prepack": "npm run build:cli"
   },
   "repository": {
@@ -62,7 +62,7 @@
     "vitest": "^5.0.5"
   },
   "bin": {
-    "lcc": "bin/lcc.mjs"
+    "skck": "bin/skck.mjs"
   },
   "files": [
     "bin",

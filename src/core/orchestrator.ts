@@ -84,7 +84,14 @@ export class Orchestrator {
     const makeGemma =
       deps.createGemma ??
       ((p: Preferences) =>
-        new VibeGemma({ provider: p.modelProvider, baseUrl: process.env.OLLAMA_BASE_URL, model: process.env.OLLAMA_MODEL, think: think === "low" || think === "medium" || think === "high" ? think : false }));
+        new VibeGemma({
+          provider: p.modelProvider,
+          baseUrl: process.env.OLLAMA_BASE_URL,
+          model: process.env.OLLAMA_MODEL,
+          think: think === "low" || think === "medium" || think === "high" ? think : false,
+          gatewayKey: process.env.AI_GATEWAY_API_KEY,
+          gatewayModel: process.env.SIDEKICK_GEMMA_MODEL,
+        }));
     this.gemma = makeGemma(state.preferences);
     this.vibe = new VibeController({
       workspace: () => this.ws(),

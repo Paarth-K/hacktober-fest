@@ -1,9 +1,9 @@
-# Local Code Companion
+# Sidekick
 
 Tell it what you want changed in your project, in plain words. A local Gemma model asks a quick question if something important is unclear, writes clear instructions for **Claude Code**, and Claude makes the change while you watch. Afterwards Gemma explains what changed at your level: new to coding, learning, or experienced. Every change is kept as its own package you can go back to.
 
 ```
-◆ Companion  ·  my-app                                                       ● ready
+◆ Sidekick  ·  my-app                                                       ● ready
 ╭ Changes ───────────────╮╭──────────────────────────────────────────────────────────╮
 │  + New change          ││ Ask  Progress  Learn                                     │
 │  ✔ add a contact page  ││                                                          │
@@ -17,29 +17,29 @@ Tell it what you want changed in your project, in plain words. A local Gemma mod
 
 ## Install and open it
 
-Pick one way to install the `lcc` command (one time, from this repo):
+Pick one way to install the `skck` command (one time, from this repo):
 
 ```bash
 npm install
 
-# A) Linked (for development): lcc runs this repo's code; `git pull` updates it.
+# A) Linked (for development): skck runs this repo's code; `git pull` updates it.
 npm link
 
 # B) Real global install: builds a self-contained package and installs a copy.
-npm pack                                   # runs `npm run build:cli`, makes local-code-companion-0.1.0.tgz
-npm install -g ./local-code-companion-0.1.0.tgz
+npm pack                                   # runs `npm run build:cli`, makes sidekick-cli-0.1.0.tgz
+npm install -g ./sidekick-cli-0.1.0.tgz
 ```
 
 Then, every time, go to the project you want to change and run it there:
 
 ```bash
 cd ~/path/to/your/project
-lcc                 # or: lcc ~/path/to/your/project
+skck                 # or: skck ~/path/to/your/project
 ```
 
-To remove it: `npm uninstall -g local-code-companion`.
+To remove it: `npm uninstall -g sidekick-cli`.
 
-You need [Ollama](https://ollama.com) running with a Gemma model (`ollama pull gemma4:31b`), and Claude Code installed and logged in (run `claude` once). `lcc --window` opens the older floating desktop window instead.
+Gemma runs through the **Vercel AI Gateway** when `AI_GATEWAY_API_KEY` is set in a `.env` file (this repo's `.env`, or `.env` in Sidekick's data folder for an installed copy; `.env` is gitignored and never packaged). Optional: `SIDEKICK_GEMMA_MODEL` (default `google/gemma-4-26b-a4b-it`). Note this sends your prompt and the code diffs to Vercel. Without a key it uses local [Ollama](https://ollama.com) with a Gemma model (`ollama pull gemma4:31b`), and Claude Code installed and logged in (run `claude` once). `skck --window` opens the older floating desktop window instead.
 
 **How it works:** type what you want and press Enter. Answer Gemma's question if it asks (press a number or type your own answer). The view switches to **Progress** while Claude works, with automatic permissions (Esc stops it), and then to **Learn** when it's done. In Learn, press 1, 2 or 3 to change how technical the explanation is, Enter to reveal the quiz answer, or type a question about the change. ↑/↓ moves between your past changes.
 

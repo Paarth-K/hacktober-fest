@@ -1,4 +1,4 @@
-// `lcc --setup`: a few numbered questions, saved to config.json.
+// `skck --setup`: a few numbered questions, saved to config.json.
 import { spawn } from "node:child_process";
 import { Box, Text, useApp, useInput } from "ink";
 import { useEffect, useState } from "react";
@@ -13,13 +13,13 @@ interface Q {
 
 const FAST_GEMMA = "gemma4:e2b";
 
-export function Setup({ initial, installedGemma }: { initial: Config; installedGemma: string[] }) {
+export function Setup({ initial, installedGemma, gateway }: { initial: Config; installedGemma: string[]; gateway?: string }) {
   const { exit } = useApp();
   const gemmaOptions = [
     ...installedGemma.map((t) => ({ label: t, value: t, note: /31b|27b/.test(t) ? "best quality, slower" : "installed" })),
     ...(installedGemma.includes(FAST_GEMMA) ? [] : [{ label: FAST_GEMMA, value: FAST_GEMMA, note: "much faster, needs a one-time download" }]),
   ];
-  const questions: Q[] = [
+  const all: Q[] = [
     { key: "level", title: "How much coding do you know?", hint: "Changes how Gemma asks questions and explains changes.", options: [
       { label: "New to coding", value: "beginner" }, { label: "Learning", value: "intermediate" }, { label: "Experienced", value: "expert" } ] },
     { key: "agent", title: "Which coding agent should make the changes?", options: [
@@ -34,6 +34,8 @@ export function Setup({ initial, installedGemma }: { initial: Config; installedG
     { key: "autoPermissions", title: "Let Claude edit files and run commands without asking?", options: [
       { label: "Yes", value: true, note: "recommended" }, { label: "Only edit files", value: false } ] },
   ];
+  // With the Vercel AI Gateway configured (.env), Gemma runs remotely: no local model to choose.
+  const questions = gateway ? all.filter((q) => q.key !== "gemmaModel" && q.key !== "showThinking") : all;
   const [step, setStep] = useState(0);
   const [cfg, setCfg] = useState<Config>(initial);
   const [pulling, setPulling] = useState<string | null>(null);
@@ -92,7 +94,8 @@ export function Setup({ initial, installedGemma }: { initial: Config; installedG
 
   return (
     <Box flexDirection="column" padding={1} gap={1}>
-      <Text color="cyan" bold>◆ Companion setup</Text>
+      <Text color="cyan" bold>◆ Sidekick setup</Text>
+      {gateway && <Text dimColor>{`Gemma: ${gateway} via Vercel AI Gateway (set in .env)`}</Text>}
       {!done && !confirmPull && !pulling && (() => {
         const q = questions[step]!;
         return (
@@ -124,7 +127,7 @@ export function Setup({ initial, installedGemma }: { initial: Config; installedG
       {done && !pulling && (
         <Box flexDirection="column">
           {pullLog && <Text>{pullLog}</Text>}
-          <Text color="green" bold>Saved. Run `lcc` in any project folder.</Text>
+          <Text color="green" bold>Saved. Run `skck` in any project folder.</Text>
           <Text dimColor>{configPath()}</Text>
         </Box>
       )}
